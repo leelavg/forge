@@ -17,17 +17,17 @@ ius_inst() {
 }
 
 tmux_inst() {
-    ius
+    ius_inst
     sudo yum install -y tmux2u
 }
 
 git_inst(){
-    ius
+    ius_inst
     sudo yum install -y git2u-all
 }
 
 py36_inst(){
-    ius
+    ius_inst
     sudo yum -y install python36u python36u-pip python36u-devel
 }
 
