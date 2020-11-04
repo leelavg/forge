@@ -1,0 +1,15 @@
+-
+    name: 'Installing Gluster on RHEL 7 Clients'
+    hosts: rh7_clients
+    strategy: free
+    gather_facts: false
+    vars_files:
+        - vars.yml
+    tasks:
+        -
+            name: 'Enabling required repos'
+            shell: 'subscription-manager repos --enable={{item}}'
+            with_items: '{{repos_rh7_c}}'
+        -
+            name: 'Install required packages'
+            yum: 'name={{pkgs_rh7_c}} state=present'

@@ -1,0 +1,12 @@
+---
+# - import_playbook: base_install.yml
+
+# Uncomment imports if needed
+# - import_playbook: rh8_s.yml
+# - import_playbook: rh8_c.yml
+# - import_playbook: rh7_s.yml
+# - import_playbook: rh7_c.yml
+
+# Add firewall rule post gluster installation
+- import_playbook: firewall.yml
+...

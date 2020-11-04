@@ -1,0 +1,20 @@
+-
+    name: 'Base config for installing Gluster on all machines'
+    hosts: hosts
+    strategy: free
+    gather_facts: false
+    vars_files:
+        - vars.yml
+    tasks:
+        -
+            name: 'Registering credentials'
+            shell: 'subscription-manager register --username={{username}} --password={{password}} --force'
+        -
+            name: 'Attaching pool ID'
+            shell: 'subscription-manager attach --pool={{pool}}'
+        -
+            name: 'Setting Role'
+            shell: "subscription-manager role --set='{{role}}'"
+        -
+            name: 'Disabling all the repos'
+            shell: "subscription-manager repos --disable='*'"

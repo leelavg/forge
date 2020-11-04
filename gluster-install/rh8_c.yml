@@ -1,0 +1,16 @@
+-
+    name: 'Installing Gluster on RHEL 8 Clients'
+    hosts: rh8_clients
+    strategy: free
+    gather_facts: false
+    vars_files:
+        - vars.yml
+    tasks:
+        -
+            name: 'Enabling required repos'
+            shell: 'subscription-manager repos --enable={{item}}'
+            with_items: '{{repos_rh8_c}}'
+        -
+            name: 'Install required packages'
+            yum: 'name={{pkgs_rh8_c}} state=present'
+
