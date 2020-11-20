@@ -1,15 +1,22 @@
 -
-    name: 'Installing Gluster on RHEL 7 Servers'
-    hosts: rh7_servers
-    strategy: free
-    gather_facts: false
-    vars_files:
-        - vars.yml
-    tasks:
-        -
-            name: 'Enabling required repos'
-            shell: 'subscription-manager repos --enable={{item}}'
-            with_items: '{{repos_rh7_s}}'
-        -
-            name: 'Install required packages'
-            yum: 'name={{pkgs_rh7_s}} state=present'
+  name: 'Installing Gluster on RHEL 7 Servers'
+  hosts: 7gs
+  vars_files:
+    - vars.yml
+    - local_links.yml
+  tasks:
+    # -
+    #   name: 'Enabling required repos'
+    #   rhsm_repository: 'name={{_7sb}} state=enabled'
+    # -
+    #   name: 'Install yum-config-manager'
+    #   yum: 'name=yum-utils state=present disable_gpg_check=yes'
+    # -
+    #   name: 'Add local repo links'
+    #   command: 'yum-config-manager --add-repo="{{_7sl}}"'
+    # -
+    #   name: 'Clean all cache'
+    #   command: 'yum clean all'
+    -
+      name: 'Install required packages'
+      yum: 'name={{_7sp}} state=present disable_gpg_check=yes'

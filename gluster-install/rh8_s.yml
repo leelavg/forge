@@ -1,15 +1,19 @@
 -
-    name: 'Installing Gluster on RHEL 8 Servers'
-    hosts: rh8_servers
-    strategy: free
-    gather_facts: false
-    vars_files:
-        - vars.yml
-    tasks:
-        -
-            name: 'Enabling required repos'
-            shell: 'subscription-manager repos --enable={{item}}'
-            with_items: '{{repos_rh8_s}}'
-        -
-            name: 'Install required packages'
-            yum: 'name={{pkgs_rh8_s}} state=present'
+  name: 'Installing Gluster on RHEL 8 Servers'
+  hosts: rhel8s
+  vars_files:
+    - vars.yml
+    - local_links.yml
+  tasks:
+    -
+      name: 'Enabling required repos'
+      rhsm_repository: 'name={{_8sb}} state=enabled'
+    -
+      name: 'Add local repo links'
+      command: 'dnf config-manager --add-repo="{{_8sl}}"'
+    -
+      name: 'Clean all cache'
+      command: 'dnf clean all'
+    -
+      name: 'Install required packages'
+      yum: 'name={{_8sp}} state=present disable_gpg_check=yes'

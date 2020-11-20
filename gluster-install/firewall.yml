@@ -1,16 +1,19 @@
 -
-    name: 'Enabling firewall rules for gluster'
-    hosts: hosts
-    strategy: free
-    gather_facts: false
-    vars_files:
-        - vars.yml
-    tasks:
-        -
-            name: 'Adding firewall rules'
-            command: 'firewall-cmd --zone=public --add-service={{item}}'
-            with_items: '{{firewall}}'
-        -
-            name: 'Adding firewall rules permanently'
-            command: 'firewall-cmd --zone=public --permanent --add-service={{item}}'
-            with_items: '{{firewall}}'
+  name: 'Enabling firewall rules for gluster'
+  hosts:
+    - rhel8s
+    - rhel7s
+  vars_files:
+    - vars.yml
+  tasks:
+    -
+      name: 'Start glusterd'
+      systemd: 'state=started name=glusterd'
+    -
+      name: 'Adding firewall rules'
+      command: 'firewall-cmd --zone=public --add-service={{item}}'
+      with_items: '{{firewall}}'
+    -
+      name: 'Adding firewall rules permanently'
+      command: 'firewall-cmd --zone=public --permanent --add-service={{item}}'
+      with_items: '{{firewall}}'
