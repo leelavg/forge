@@ -1,2 +1,2 @@
-glsuter-install/no-git*
 gluster-install/*vars*
+local_links.yml
