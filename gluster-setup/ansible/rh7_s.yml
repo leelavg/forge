@@ -2,8 +2,8 @@
   name: 'Installing Gluster on RHEL 7 Servers'
   hosts: 7gs
   vars_files:
-    - vars.yml
-    - local_links.yml
+    - local-vars.yml
+    - local-links.yml
   tasks:
     # -
     #   name: 'Enabling required repos'

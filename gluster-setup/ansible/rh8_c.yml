@@ -2,8 +2,8 @@
   name: 'Installing Gluster on RHEL 8 Clients'
   hosts: 8c
   vars_files:
-    - vars.yml
-    - local_links.yml
+    - local-vars.yml
+    - local-links.yml
   tasks:
     -
       name: 'Enabling required repos'

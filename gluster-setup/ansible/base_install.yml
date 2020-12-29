@@ -2,7 +2,7 @@
   name: 'Base config for installing Gluster on all machines'
   hosts: all
   vars_files:
-    - vars.yml
+    - local-vars.yml
   tasks:
     -
       name: 'Registering credentials'
