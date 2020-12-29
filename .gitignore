@@ -1,2 +1,2 @@
-gluster-install/*vars*
-local_links.yml
+*/**/*vars*
+*/**/*local_links*
