@@ -10,7 +10,7 @@
 # Required RPMs on KVM :
 # yum install virt libvirt libvirt-python libvirt-client libguestfs libguestfs-tools
 # yum groupinstall virtualization-client virtualization-platform virtualization-tools
-# yum expect
+# yum install expect
 
 # Additional Notes:
 #
