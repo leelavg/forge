@@ -1,6 +1,8 @@
 #!/bin/bash
 # DONOT RUN WITHOUT CHECKING THE SCRIPT
 
+negate='test-|registry|alpine|k3|local|<none>|act-|moby|binfmt'
+
 if [[ $1 == 'setup' ]]; then
   # Start local docker registry if it doesn't exist
   if docker ps --format {{.Names}} | grep -v registry; then 
@@ -8,7 +10,6 @@ if [[ $1 == 'setup' ]]; then
   fi
 
   # Update local docker images
-  negate='test-|registry|alpine|k3|local|<none>'
   docker images --format '{{.Repository}}:{{.Tag}}' | grep -Pv $negate | xargs -I image docker pull image
   docker rmi $(docker images -f "dangling=true" -q) && docker volume rm $(docker volume ls -qf dangling=true)
   docker save $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -Pv $negate) -o /tmp/allinone.tar
@@ -49,7 +50,6 @@ fi
 if [[ $1 == 'teardown' ]]; then
 
   # Pull all images that are currently deployed before teardown
-  negate='test-|registry|alpine|k3|local|<none>'
   for i in $(kubectl get pods --namespace kadalu -o jsonpath="{..image}" | grep -Pv $negate); do docker pull "$i"; done;
 
   # Remove Kadalu
