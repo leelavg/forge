@@ -49,6 +49,10 @@ fi
 
 if [[ $1 == 'teardown' ]]; then
 
+  # Remove sanity pods if there are any
+  kubectl delete ds -l name=sanity-ds --wait=true
+  kubectl delete deploy -l name=sanity-dp --wait=true
+
   # Pull all images that are currently deployed before teardown
   for i in $(kubectl get pods --namespace kadalu -o jsonpath="{..image}" | grep -Pv $negate); do docker pull "$i"; done;
 
