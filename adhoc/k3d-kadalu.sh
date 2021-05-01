@@ -32,7 +32,12 @@ EOF
   mkdir -p /tmp/k3d/kubelet/pods
 
   # Create k3d test cluster
-  k3d cluster create test -a 3 -v /tmp/k3d/kubelet/pods:/var/lib/kubelet/pods:shared -v /mnt/sdc:/mnt/sdc -v /mnt/sdd:/mnt/sdd -v /mnt/sde:/mnt/sde -v ~/.k3d/registries.yaml:/etc/rancher/k3s/registries.yaml
+  k3d cluster create test -a 3 \
+      -v /tmp/k3d/kubelet/pods:/var/lib/kubelet/pods:shared \
+      -v /mnt/sdc:/mnt/sdc -v /mnt/sdd:/mnt/sdd \
+      -v /mnt/sde:/mnt/sde \
+      -v ~/.k3d/registries.yaml:/etc/rancher/k3s/registries.yaml \
+      --k3s-server-arg '--kube-apiserver-arg=feature-gates=EphemeralContainers=true'
 
   # Import all the docker images into k3d cluster
   k3d image import -k /tmp/allinone.tar -c test
