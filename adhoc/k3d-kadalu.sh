@@ -2,85 +2,148 @@
 # DONOT RUN WITHOUT CHECKING THE SCRIPT
 
 negate='test-|registry|alpine|k3|local|<none>|act-|moby|binfmt'
-pull=${2:-'yes'}
+options="mhp:a:t:k:"
+prg="teardown"
+pull="yes"
+agents=3
+kadalu="yes"
 
-if [[ $1 == 'setup' ]]; then
-  # Start local docker registry if it doesn't exist
-  if docker ps --format {{.Names}} | grep -v registry; then 
-    docker container run -d --name registry.localhost --restart always -p 5000:5000 registry:2
-  fi
+# Similar to https://github.com/RedHatQE/pylero/blob/master/gen_docs.sh script
+usage()
+{
+    echo
+    echo "Create a k3d cluster and optionally deploy kadalu"
+    echo
+    echo "Usage: ./k3d-kadalu.sh [options]"
+    echo "options:"
+    echo "  p   Create a cluster without pulling latest (kadalu) images. (default: yes)"
+    echo "  a   Number of k3d agents (default: 3)"
+    echo "  t   Program type: setup/teardown(default)"
+    echo "  k   Deploy Kadalu Operator (default: yes)"
+    echo "  m   Create a minimal k3d-kadalu cluster (p: no, a:1, t: setup, k: yes)"
+    echo "      Can be overriden like: -m -a 2 -k no"
+    echo "  h   Print this help."
+    echo
+}
 
-  # Update local docker images
-  if [ $pull == 'yes' ]; then
-    docker images --format '{{.Repository}}:{{.Tag}}' | grep -Pv $negate | xargs -I image docker pull image
-  fi
-  docker rmi $(docker images -f "dangling=true" -q) && docker volume rm $(docker volume ls -qf dangling=true)
-  docker save $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -Pv $negate) -o /tmp/allinone.tar
+while getopts $options opt; do
+   case ${opt} in
+    m )
+        prg="setup"
+        pull="no"
+        agents=1
+        ;;
+    p )
+        pull=$OPTARG
+        ;;
+    a )
+        agents=$OPTARG
+        ;;
+    t )
+        prg=$OPTARG
+        ;;
+    k )
+        kadalu=$OPTARG
+        ;;
+    h )
+        usage
+        exit;;
+    : )
+        printf "\nInvalid option: $OPTARG requires an argument\n" 1>&2
+        usage 1>&2
+        exit;;
+    \? )
+        printf "\nInvalid Option: -$OPTARG\n" 1>&2
+        usage 1>&2
+        exit;;
+   esac
+done
 
-  # Create registries.yaml for k3d
-  # Setup k3d
-  cat > ~/.k3d/registries.yaml << EOF
-mirrors:
-  "registry.localhost:5000":
-    endpoint:
-      - "http://registry.localhost:5000"
-EOF
+shift $((OPTIND -1))
+echo Received Arguments: pull="$pull" agents="$agents" prg="$prg" kadalu="$kadalu"
 
-  # Cleanup and mount disks
-  for i in {c,d,e}; do
-    wipefs -a /dev/sd$i; mkfs.xfs /dev/sd$i;
-    mkdir -p /mnt/sd$i; mount /dev/sd$i /mnt/sd$i;
-  done;
-  # Pods need a shared mount
-  mkdir -p /tmp/k3d/kubelet/pods
+# if [[ $prg == "setup" ]]; then
+#   # Start local docker registry if it doesn't exist
+#   if ! docker ps --format {{.Names}} | grep registry; then
+#     docker container run -d --name registry.localhost --restart always -p 5000:5000 registry:2
+#   fi
 
-  # Create k3d test cluster
-  k3d cluster create test -a 3 \
-      -v /tmp/k3d/kubelet/pods:/var/lib/kubelet/pods:shared \
-      -v /mnt/sdc:/mnt/sdc -v /mnt/sdd:/mnt/sdd \
-      -v /mnt/sde:/mnt/sde \
-      -v ~/.k3d/registries.yaml:/etc/rancher/k3s/registries.yaml \
-      --k3s-server-arg '--kube-apiserver-arg=feature-gates=EphemeralContainers=true'
+#   # Update local docker images
+#   if [ $pull == "yes" ]; then
+#     docker images --format '{{.Repository}}:{{.Tag}}' | grep -Pv $negate | xargs -I image docker pull image
+#   fi
+#   docker rmi $(docker images -f "dangling=true" -q) && docker volume rm $(docker volume ls -qf dangling=true)
 
-  # Import all the docker images into k3d cluster
-  k3d image import -k /tmp/allinone.tar -c test
+#   if [[ $pull == "yes" || ! -e /tmp/allinone.tar ]]; then
+#     docker save $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -Pv $negate) -o /tmp/allinone.tar
+#   fi
 
-  # Attach registry network to k3d
-  docker network connect k3d-test registry.localhost
+#   # Create registries.yaml for k3d
+#   # Setup k3d
+#   cat > ~/.k3d/registries.yaml << EOF
+# mirrors:
+#   "registry.localhost:5000":
+#     endpoint:
+#       - "http://registry.localhost:5000"
+# EOF
 
-  # Remove taints from the node
-  for name in $(kubectl get nodes -o jsonpath={'..name'}); do kubectl taint nodes $name node.cloudprovider.kubernetes.io/uninitialized-; done;
+#   # Cleanup and mount disks
+#   for i in {c,d,e}; do
+#     wipefs -a /dev/sd$i; mkfs.xfs /dev/sd$i;
+#     mkdir -p /mnt/sd$i; mount /dev/sd$i /mnt/sd$i;
+#   done;
+#   # Pods need a shared mount
+#   mkdir -p /tmp/k3d/kubelet/pods
 
-  # Set 'verbose' to 'yes'
-  curl -s https://raw.githubusercontent.com/kadalu/kadalu/devel/manifests/kadalu-operator.yaml | sed 's/"no"/"yes"/' | kubectl apply -f -
-fi
+#   # Create k3d test cluster
+#   k3d cluster create test -a $agents \
+#       -v /tmp/k3d/kubelet/pods:/var/lib/kubelet/pods:shared \
+#       -v /mnt/sdc:/mnt/sdc -v /mnt/sdd:/mnt/sdd \
+#       -v /mnt/sde:/mnt/sde \
+#       -v ~/.k3d/registries.yaml:/etc/rancher/k3s/registries.yaml \
+#       --k3s-server-arg '--kube-apiserver-arg=feature-gates=EphemeralContainers=true'
 
-if [[ $1 == 'teardown' ]]; then
+#   # Import all the docker images into k3d cluster
+#   k3d image import -k /tmp/allinone.tar -c test
 
-  # Remove sanity pods if there are any
-  kubectl delete ds -l name=sanity-ds --wait=true
-  kubectl delete deploy -l name=sanity-dp --wait=true
+#   # Attach registry network to k3d
+#   docker network connect k3d-test registry.localhost
 
-  # Pull all images that are currently deployed before teardown
-  if [ $pull == 'yes' ]; then
-    for i in $(kubectl get pods --namespace kadalu -o jsonpath="{..image}" \
-      | grep -Pv $negate); do docker pull "$i"; done;
-  fi
+#   # Remove taints from the node
+#   for name in $(kubectl get nodes -o jsonpath={'..name'}); do kubectl taint nodes $name node.cloudprovider.kubernetes.io/uninitialized-; done;
 
-  # Remove Kadalu
-  bash <(curl -s https://raw.githubusercontent.com/kadalu/kadalu/devel/extras/scripts/cleanup)
+#   if [ $kadalu == "yes" ]; then
+#     # Set 'verbose' to 'yes'
+#     curl -s https://raw.githubusercontent.com/kadalu/kadalu/devel/manifests/kadalu-operator.yaml | sed 's/"no"/"yes"/' | kubectl apply -f -
+#     fi
+# fi
 
-  # Delete k3d cluster
-  k3d cluster delete test
+# if [[ $prg == "teardown" ]]; then
 
-  # Unmount any left overs of k3d
-  diff <(df -ha | grep pods | awk '{print $NF}') <(df -h | grep pods | awk '{print $NF}') | awk '{print $2}' | xargs umount -l
+#   # Remove sanity pods if there are any
+#   kubectl delete ds -l name=sanity-ds --wait=true
+#   kubectl delete deploy -l name=sanity-dp --wait=true
 
-  # Cleanup mount point
-  for i in {c,d,e}; do rm -rf /mnt/sd$i/*; umount -l /mnt/sd$i; done;
+#   # Pull all images that are currently deployed before teardown
+#   if [ $pull == 'yes' ]; then
+#     for i in $(kubectl get pods --namespace kadalu -o jsonpath="{..image}" \
+#       | grep -Pv $negate); do docker pull "$i"; done;
+#   fi
 
-  # Remove any left overs of docker
-  docker rmi $(docker images -f "dangling=true" -q)
-  docker volume prune -f
-  docker volume rm $(docker volume ls -qf dangling=true)
-fi
+#   # Remove Kadalu
+#   bash <(curl -s https://raw.githubusercontent.com/kadalu/kadalu/devel/extras/scripts/cleanup)
+
+#   # Delete k3d cluster
+#   k3d cluster delete test
+
+#   # Unmount any left overs of k3d
+#   diff <(df -ha | grep pods | awk '{print $NF}') <(df -h | grep pods | awk '{print $NF}') | awk '{print $2}' | xargs umount -l
+
+#   # Cleanup mount point
+#   for i in {c,d,e}; do rm -rf /mnt/sd$i/*; umount -l /mnt/sd$i; done;
+
+#   # Remove any left overs of docker
+#   docker rmi $(docker images -f "dangling=true" -q)
+#   docker volume prune -f
+#   docker volume rm $(docker volume ls -qf dangling=true)
+# fi
