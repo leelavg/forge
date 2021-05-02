@@ -2,6 +2,7 @@
 # DONOT RUN WITHOUT CHECKING THE SCRIPT
 
 negate='test-|registry|alpine|k3|local|<none>|act-|moby|binfmt'
+pull=${2:-'yes'}
 
 if [[ $1 == 'setup' ]]; then
   # Start local docker registry if it doesn't exist
@@ -10,7 +11,9 @@ if [[ $1 == 'setup' ]]; then
   fi
 
   # Update local docker images
-  docker images --format '{{.Repository}}:{{.Tag}}' | grep -Pv $negate | xargs -I image docker pull image
+  if [ $pull == 'yes' ]; then
+    docker images --format '{{.Repository}}:{{.Tag}}' | grep -Pv $negate | xargs -I image docker pull image
+  fi
   docker rmi $(docker images -f "dangling=true" -q) && docker volume rm $(docker volume ls -qf dangling=true)
   docker save $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -Pv $negate) -o /tmp/allinone.tar
 
@@ -59,7 +62,10 @@ if [[ $1 == 'teardown' ]]; then
   kubectl delete deploy -l name=sanity-dp --wait=true
 
   # Pull all images that are currently deployed before teardown
-  for i in $(kubectl get pods --namespace kadalu -o jsonpath="{..image}" | grep -Pv $negate); do docker pull "$i"; done;
+  if [ $pull == 'yes' ]; then
+    for i in $(kubectl get pods --namespace kadalu -o jsonpath="{..image}" \
+      | grep -Pv $negate); do docker pull "$i"; done;
+  fi
 
   # Remove Kadalu
   bash <(curl -s https://raw.githubusercontent.com/kadalu/kadalu/devel/extras/scripts/cleanup)
