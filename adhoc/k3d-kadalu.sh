@@ -98,7 +98,7 @@ EOF
           case $yn in
               Yes )
                   for i in $(eval echo $dev); do
-                      wipefs -a /dev/sd$i; mkfs.xfs /dev/sd$i;
+                      wipefs -a -f /dev/sd$i; mkfs.xfs /dev/sd$i;
                       mkdir -p /mnt/sd$i; mount /dev/sd$i /mnt/sd$i;
                   done;
                   break ;;
