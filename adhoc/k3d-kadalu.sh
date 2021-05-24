@@ -2,6 +2,7 @@
 # DONOT RUN WITHOUT CHECKING THE SCRIPT
 
 negate='test-|registry|alpine|k3|local|<none>|act-|moby|binfmt'
+only='operator|server|csi'
 options="mhp:a:t:k:"
 prg="teardown"
 pull="yes"
@@ -72,13 +73,13 @@ if [[ $prg == "setup" ]]; then
 
   # Update local docker images
   if [ $pull == "yes" ]; then
-      docker images --format '{{.Repository}}:{{.Tag}}' | grep -Pv $negate | xargs -I image docker pull image
+      docker images --format '{{.Repository}}:{{.Tag}}' | grep -P $only | xargs -I image docker pull image
   fi
 
   docker rmi $(docker images -f "dangling=true" -q) && docker volume rm $(docker volume ls -qf dangling=true)
 
   if [[ $pull == "yes" || ! -e /tmp/allinone.tar ]]; then
-      docker save $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -Pv $negate) -o /tmp/allinone.tar
+      docker save $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -P $only) -o /tmp/allinone.tar
   fi
 
   # Create registries.yaml for k3d
@@ -144,7 +145,7 @@ if [[ $prg == "teardown" ]]; then
   # Pull all images that are currently deployed before teardown
   if [ $pull == "yes" ]; then
       for i in $(kubectl get pods --namespace kadalu -o jsonpath="{..image}" \
-          | grep -Pv $negate); do docker pull "$i"; done;
+          | grep -P $only); do docker pull "$i"; done;
   fi
 
   # Remove Kadalu
