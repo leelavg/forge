@@ -8,7 +8,7 @@
 # END - Create VMs from base image, attach disks and write IPs to hostsfile
 
 # Required RPMs on KVM :
-# yum install virt libvirt libvirt-python libvirt-client libguestfs libguestfs-tools
+# yum install virt-install libvirt libvirt-python libvirt-client libguestfs libguestfs-tools
 # yum install expect
 
 # Additional Notes:
