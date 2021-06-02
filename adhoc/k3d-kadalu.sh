@@ -102,6 +102,7 @@ EOF
                       wipefs -a -f /dev/sd$i; mkfs.xfs /dev/sd$i;
                       mkdir -p /mnt/sd$i; mount /dev/sd$i /mnt/sd$i;
                   done;
+                  umount -l /mnt/sde; wipefs -a -f /dev/sde;
                   break ;;
               No ) echo "Proceeding without wiping devices, may face issues while using them in k3d cluster"; break;;
           esac
@@ -115,7 +116,7 @@ EOF
   k3d cluster create test -a $agents \
       -v /tmp/k3d/kubelet/pods:/var/lib/kubelet/pods:shared \
       -v /mnt/sdc:/mnt/sdc -v /mnt/sdd:/mnt/sdd \
-      -v /mnt/sde:/mnt/sde \
+      -v /dev/sde:/dev/sde \
       -v ~/.k3d/registries.yaml:/etc/rancher/k3s/registries.yaml \
       --k3s-server-arg "--kube-apiserver-arg=feature-gates=EphemeralContainers=true" \
       --k3s-server-arg --disable=local-storage
@@ -158,7 +159,7 @@ if [[ $prg == "teardown" ]]; then
   diff <(df -ha | grep pods | awk '{print $NF}') <(df -h | grep pods | awk '{print $NF}') | awk '{print $2}' | xargs umount -l
 
   # Cleanup mount point
-  for i in {c,d,e}; do rm -rf /mnt/sd$i/*; umount -l /mnt/sd$i; done;
+  # for i in {c,d,e}; do rm -rf /mnt/sd$i/*; umount -l /mnt/sd$i; done;
 
   # Remove any left overs of docker
   docker rmi $(docker images -f "dangling=true" -q)
