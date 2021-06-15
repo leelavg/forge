@@ -2,18 +2,20 @@
 
 # ===== STANDALONE SCRIPT ===== NO NEED TO CLONE WHOLE REPO =====
 
+# Current Status:
+# Total Steps: create_scripts, prep_kvm, prep_base, compatibility_check, perform_op and write_ips
+# Untested Steps [TODO]: prep_base and write_ips
+
 # Sample usage:
 # bash clone-vm.sh --base-vm=centos7-34 --base-ip=10.10.10.10 --prefix=7-34 --vms=3
 # For help run: bash clone-vm.sh -h
 
 # BEGIN - Existing base image
-# END - Create VMs from base image, attach disks (optional) and write IPs to a file
+# END - Create VMs from base image, attach disks (optional) and write IPs to a file (optional)
 
 # Required RPMs on KVM :
 # yum install virt-install libvirt libvirt-python libvirt-client libguestfs libguestfs-tools net-tools
 
-# Additional Notes:
-#
 # Scope:
 # - Clone a base VM (either ISO or PXE booted), attach disks
 # - Thin base image results in faster cloning and prepping the clones
@@ -33,7 +35,7 @@
 # - Experimental: take note of VMs IP, currently dumps ip address from arp cache
 # - Checking for available space isn't implemented
 # - No error recovery is inbuilt (just backoff if something goes wrong)
-#
+
 # Notes:
 # pool_path=$(virsh pool-dumpxml default | grep -Po '(?<=path>).*?(?=<)')
 # for i in `virsh list --all | grep -vP 'centos|Name|leela|--' | awk '{print $2}'`; do virsh destroy $i; virsh undefine $i; rm -f $pool_path/$i*; done;
@@ -63,6 +65,7 @@ exec >&${mytee[1]} 2>&1
 trap "rm -rf $TEMP_DIR; cd $BASE_DIR" EXIT
 
 function help() {
+    echo
     echo "Usage: ${0} [--option=argument] or ${0} [-o argument]"
     echo "  -h | --help help    display help"
     echo "  -b | --base-vm      Name of base VM as displayed"
@@ -73,7 +76,8 @@ function help() {
     echo "  -s | --size         Size of each disk, should contain Unit as well (Default: 10G)"
     echo "  -g | --get-ip       EXPERIMENTAL, writes IPs of new VMs to a file (Default: no)"
     echo "  Arguments for long options should be preceeded with '=' not space. Ex: --size=25G"
-    echo "  Apart from --disks and --size all options are mandatory."
+    echo "  Apart from --disks, --size, --get-ip all other options are mandatory."
+    echo
     exit 1
 }
 
@@ -205,9 +209,9 @@ function compatibility_check() {
     host_ver=$(awk -F':' '{print $5}' /etc/system-release-cpe)
     guest_ver=$(virt-cat -d $BASE_VM /etc/system-release-cpe | awk -F':' '{print $5}')
 
-    # Pool path, (if not using default path, it should be changed in below regex accordingly)
+    # Pool path, (if not using default pool, it should be changed in below regex accordingly)
     pool_path=$(virsh pool-dumpxml default | grep -Po '(?<=path>).*?(?=<)')
-    if [[ $host_ver =~ ^7 && $guest_ver =~ ^8 ]]; then
+    if [[ $host_ver -lt $guest_ver ]]; then
         cd $pool_path
         if [ ! -d appliance ]; then
             curl -OL https://download.libguestfs.org/binaries/appliance/appliance-1.40.1.tar.xz
