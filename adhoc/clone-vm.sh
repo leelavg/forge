@@ -2,26 +2,27 @@
 
 # ===== STANDALONE SCRIPT ===== NO NEED TO CLONE WHOLE REPO =====
 
-# Current Status:
+# Current Status: USABLE
 # Total Steps: create_scripts, prep_kvm, prep_base, compatibility_check, perform_op and write_ips
 # Untested Steps [TODO]: prep_base and write_ips
 
 # Sample usage:
-# bash clone-vm.sh --base-vm=centos7-34 --base-ip=10.10.10.10 --prefix=7-34 --vms=3
+# bash clone-vm.sh --base-vm=centos7-34 --prefix=7-34 --vms=3
 # For help run: bash clone-vm.sh -h
 
 # BEGIN - Existing base image
 # END - Create VMs from base image, attach disks (optional) and write IPs to a file (optional)
 
 # Required RPMs on KVM :
-# yum install virt-install libvirt libvirt-python libvirt-client libguestfs libguestfs-tools net-tools
+# yum install virt-install libvirt libvirt-client libguestfs libguestfs-tools net-tools bc
 
 # Scope:
 # - Clone a base VM (either ISO or PXE booted), attach disks
 # - Thin base image results in faster cloning and prepping the clones
 # - Minimum expectation from the script is:
 #   - A matching base VM name as supplied in the arguments with no disks attached
-#   - Shutdown the base VM after installing/tuning required (like copying SSH keys) settings
+#   - Shutdown the base VM after installing/tuning required (like copying SSH
+#   keys, running startup.sh code block) settings
 #   - Run the script with necessary arguments as stated in `Usage:`
 #
 # Cases covered in addition to cloning VM and attaching disks:
@@ -43,12 +44,12 @@
 
 # Break on any failure
 set -e
-set -o pipefail
 
 BASE_VM=NULL
 BASE_IP=NULL
 PREFIX=NULL
-VMS=NULL
+INDEX=1
+VMS=1
 DISKS=0
 SIZE="10G"
 GET_IP="no"
@@ -65,25 +66,24 @@ exec >&${mytee[1]} 2>&1
 trap "rm -rf $TEMP_DIR; cd $BASE_DIR" EXIT
 
 function help() {
-    echo
     echo "Usage: ${0} [--option=argument] or ${0} [-o argument]"
     echo "  -h | --help help    display help"
     echo "  -b | --base-vm      Name of base VM as displayed"
     echo "  -i | --base-ip      IPv4 address of base VM"
     echo "  -p | --prefix       Prefix of new VMs (1, 2, 3 ... will be appended to this prefix)"
-    echo "  -n | --vms          Number of new VMs that should be created, should be greater than 0"
+    echo "  -x | --index        Starting index to be appended to PREFIX (Default: 1)"
+    echo "  -n | --vms          Number of new VMs that should be created (Default: 1)"
     echo "  -d | --disks        Number of disks to be attached to each VM (Default: 0)"
     echo "  -s | --size         Size of each disk, should contain Unit as well (Default: 10G)"
     echo "  -g | --get-ip       EXPERIMENTAL, writes IPs of new VMs to a file (Default: no)"
     echo "  Arguments for long options should be preceeded with '=' not space. Ex: --size=25G"
-    echo "  Apart from --disks, --size, --get-ip all other options are mandatory."
-    echo
+    echo "  Mandatory options: --base-vm, --prefix"
     exit 1
 }
 
 function create_scripts() {
 
-    # Script to be run on base vm before cloning (automatic)
+    # Script to be run on base vm before cloning (manual)
     cat << 'EOF' > startup.sh
 #!/bin/bash
 
@@ -92,8 +92,7 @@ systemctl enable serial-getty@ttyS0.service
 systemctl start serial-getty@ttyS0.service
 
 # Make interface comeup automatically
-ver=$(awk -F':' '{print $5}' /etc/system-release-cpe)
-iface=$([[ $ver =~ ^7 ]] && echo eth0 || echo ens3)
+iface=$(basename $(ls /sys/class/net/$(ip addr | awk -F': ' '/state UP/ {print $2}' | grep ^e) -d))
 sed -i 's/ONBOOT=no/ONBOOT=yes/' /etc/sysconfig/network-scripts/ifcfg-$iface
 
 # virt-sysprep is still leaving some UUIDs
@@ -108,8 +107,7 @@ EOF
 #!/bin/bash
 
 # Set a new UUID for network interface
-ver=$(awk -F':' '{print $5}' /etc/system-release-cpe)
-iface=$([[ $ver =~ ^7 ]] && echo eth0 || echo ens3)
+iface=$(basename $(ls /sys/class/net/$(ip addr | awk -F': ' '/state UP/ {print $2}' | grep ^e) -d))
 uuid=$(uuidgen $iface)
 sed -ir "s/^UUID=.*/UUID=$uuid/" /etc/sysconfig/network-scripts/ifcfg-$iface
 
@@ -127,7 +125,10 @@ EOF
 function prep_kvm() {
 
     # Generate a SSH keypair if one doesn't exist
-    echo n | ssh-keygen -q -t rsa -N '' -f ~/.ssh/id_rsa
+    if ! [ -f ~/.ssh/id_rsa ]
+    then
+        ssh-keygen -q -t rsa -N '' -f ~/.ssh/id_rsa
+    fi
 
 }
 
@@ -143,7 +144,7 @@ function prep_base() {
     count=$(($(date +%s) + 30))
     while [[ "$(date +%s)" -lt $count ]]
     do
-        ret=$(timeout 5 ping -c 5 $BASE_IP; echo $?)
+        ret=$(timeout 5 ping -c 5 $BASE_IP 1>/dev/null; echo $?)
         if [[ $ret -ne 0 ]]
         then
             break
@@ -159,16 +160,16 @@ function prep_base() {
     fi
 
     # Need to copy and run startup.sh in the base VM
-    virt-copy-out -d $BASE_VM /root/.ssh/authorized_keys .
+    virt-copy-out -d $BASE_VM /root/.ssh/authorized_keys . || touch authorized_keys
 
     # Add KVM SSH Key
     cat ~/.ssh/id_rsa.pub >> authorized_keys
 
     # Copy appended key into base vm
-    virt-copy-in -d $BASE_VM authorized_keys /root/.ssh/authorized_keys
+    virt-copy-in -d $BASE_VM authorized_keys /root/.ssh
 
     # Copy startup.sh into base vm
-    virt-copy-in -d $BASE_VM startup.sh /root/startup.sh
+    virt-copy-in -d $BASE_VM startup.sh /root
 
     # Start base vm
     virsh start $BASE_VM
@@ -177,7 +178,7 @@ function prep_base() {
     count=$(($(date +%s) + 60))
     while [[ "$(date +%s)" -lt $count ]]
     do
-        ret=$(timeout 5 ping -c 5 $BASE_IP; echo $?)
+        ret=$(timeout 5 ping -c 5 $BASE_IP 1>/dev/null; echo $?)
         if [[ $ret -eq 0 && $ret -ne 124 ]]
         then
             break
@@ -194,7 +195,7 @@ function prep_base() {
     count=$(($(date +%s) + 30))
     while [[ "$(date +%s)" -lt $count ]]
     do
-        ret=$(timeout 5 ping -c 5 $BASE_IP; echo $?)
+        ret=$(timeout 5 ping -c 5 $BASE_IP 1>/dev/null; echo $?)
         if [[ $ret -ne 0 ]]
         then
             break
@@ -211,7 +212,7 @@ function compatibility_check() {
 
     # Pool path, (if not using default pool, it should be changed in below regex accordingly)
     pool_path=$(virsh pool-dumpxml default | grep -Po '(?<=path>).*?(?=<)')
-    if [[ $host_ver -lt $guest_ver ]]; then
+    if (( $( echo "$host_ver < $guest_ver" | bc -l ) )); then
         cd $pool_path
         if [ ! -d appliance ]; then
             curl -OL https://download.libguestfs.org/binaries/appliance/appliance-1.40.1.tar.xz
@@ -247,7 +248,8 @@ function perform_op() {
     done
 
     vm_names=()
-    for i in $(seq 1 $VMS)
+    VMS=$((VMS+INDEX-1))
+    for i in $(seq $INDEX $VMS)
     do
         vm_names+=("${PREFIX}${i}")
     done
@@ -255,7 +257,7 @@ function perform_op() {
     for name in "${vm_names[@]}"
     do
         # Clone
-        virt-clone --original $BASE_VM --name $name --auto-clone
+        virt-clone --original "$BASE_VM" --name $name --auto-clone
 
         # Prep the clone
         # if `--selinux-relabel` is removed then `firshboot` script will not be trigerred
@@ -358,10 +360,10 @@ function create_vms() {
     create_scripts
 
     # Operations on KVM hypervisor
-    prep_kvm
+    # prep_kvm
 
     # Operation on base vm
-    prep_base
+    # prep_base
 
     # Checks before proceeding with cloning
     compatibility_check
@@ -388,7 +390,7 @@ function parse_args() {
         help;
     }
 
-    needs_args() {
+    needs_arg() {
         # Handle no argument case for long option
         if [[ -z "$OPTARG"  ]]
         then
@@ -396,7 +398,7 @@ function parse_args() {
         fi
     }
 
-    while getops :hb:i:p:n:d:s:-: OPT;
+    while getopts :hb:i:p:n:d:s:g:-: OPT;
     do
         if [[ "$OPT" = "-" ]]           # long option supplied
         then
@@ -409,6 +411,7 @@ function parse_args() {
             b | base-vm )   needs_arg; BASE_VM=$OPTARG;;
             i | base-ip )   needs_arg; BASE_IP=$OPTARG;;
             p | prefix  )   needs_arg; PREFIX=$OPTARG;;
+            x | index   )   needs_arg; INDEX=$OPTARG;;
             n | vms     )   needs_arg; VMS=$OPTARG;;
             d | disks   )   needs_arg; DISKS=$OPTARG;;
             s | size    )   needs_arg; SIZE=$OPTARG;;
@@ -419,20 +422,22 @@ function parse_args() {
         esac
     done
 
-    for value in "$BASE_VM" "$BASE_IP" "$PREFIX" "$VMS"
+    for value in "$BASE_VM" "$PREFIX"
     do
         if [[ "$value" == "NULL" ]]
         then
-            echo "Only --disks, --size, --get-ip options are optional."
+            echo "Mandatory options: --base-vm, --prefix"
             help
         fi
     done
 
-    if [[ $VMS -lt 1 || $DISKS -lt 0 ]]
+    if [[ $VMS -lt 1 || $DISKS -lt 0 || $INDEX -lt 1 ]]
     then
-        echo "VMs should be > 1 and disks should be >= 0"
+        echo "VMs should be >= 1, disks should be >= 0, index should be >= 1"
         help
     fi
+
+    echo "Final arguments: BASE_VM: $BASE_VM; BASE_IP: $BASE_IP; PREFIX: $PREFIX; VMS: $VMS; DISKS: $DISKS; SIZE: $SIZE; GET_IP: $GET_IP"
 
     create_vms
 
