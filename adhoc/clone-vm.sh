@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Author: Leela Venkaiah G <lgangava@redhat.com>
+
 # ===== STANDALONE SCRIPT ===== NO NEED TO CLONE WHOLE REPO =====
 
 # Current Status: USABLE
@@ -30,6 +32,7 @@
 # - Support for cloning CentOS 8 base VM on CentOS 7 KVM (similar for RHEL)
 # - Custom scripts on replacing correct UUIDs of disks and network interfaces
 # - No deletion of VMs is happening and KVM by defaults prohibits overwrites of domain
+# - Extra functionality: Attach disks to a guest VM
 #
 # Known limitations:
 # - Only core functionality (clone VM, attach disks) is implemented
@@ -38,23 +41,37 @@
 # - No error recovery is inbuilt (just backoff if something goes wrong)
 
 # Notes:
-# pool_path=$(virsh pool-dumpxml default | grep -Po '(?<=path>).*?(?=<)')
-# for i in `virsh list --all | grep -vP 'centos|Name|leela|--' | awk '{print $2}'`; do virsh destroy $i; virsh undefine $i; rm -f $pool_path/$i*; done;
+# POOL_PATH=$(virsh pool-dumpxml default | grep -Po '(?<=path>).*?(?=<)')
+# for i in `virsh list --all | grep -vP 'centos|Name|leela|--' | awk '{print $2}'`; do virsh destroy $i; virsh undefine $i; rm -f $POOL_PATH/$i*; done;
 
 
 # Break on any failure
 set -e
 
 BASE_VM=NULL
+ATTACH_DISKS="no"
 BASE_IP=NULL
 PREFIX=NULL
-INDEX=1
+START_INDEX=1
 VMS=1
 DISKS=0
 SIZE="10G"
 GET_IP="no"
 TEMP_DIR=$(mktemp -d)
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Pool path, (if not using default pool, it should be changed in below regex accordingly)
+POOL_PATH=$(virsh pool-dumpxml default | grep -Po '(?<=path>).*?(?=<)')
+
+# Char to index mapping
+declare -A CHAR_MAP
+value=1
+
+for i in {a..z}
+do
+    CHAR_MAP["$i"]=$value
+    value=$((value + 1))
+done
 
 # Dump everything to a log file
 TIME=$(date +%b_%d_%y-%H-%M-%S)
@@ -66,18 +83,26 @@ exec >&${mytee[1]} 2>&1
 trap "rm -rf $TEMP_DIR; cd $BASE_DIR" EXIT
 
 function help() {
+    echo
     echo "Usage: ${0} [--option=argument] or ${0} [-o argument]"
     echo "  -h | --help help    display help"
-    echo "  -b | --base-vm      Name of base VM as displayed"
+    echo "  -a | --attach-disks Attach disks to a running VM (Default: no)"
+    echo "  -b | --base-vm      Name of base VM as displayed in 'virsh list'"
     echo "  -i | --base-ip      IPv4 address of base VM"
     echo "  -p | --prefix       Prefix of new VMs (1, 2, 3 ... will be appended to this prefix)"
-    echo "  -x | --index        Starting index to be appended to PREFIX (Default: 1)"
-    echo "  -n | --vms          Number of new VMs that should be created (Default: 1)"
+    echo "  -x | --start-index  Starting index to be appended to PREFIX (Default: 1)"
+    echo "  -n | --vms          Number of new VMs that should be created or if --attach-disks is "
+    echo "                      provided VM name is constructed using --prefix and this option (Default: 1)"
     echo "  -d | --disks        Number of disks to be attached to each VM (Default: 0)"
     echo "  -s | --size         Size of each disk, should contain Unit as well (Default: 10G)"
     echo "  -g | --get-ip       EXPERIMENTAL, writes IPs of new VMs to a file (Default: no)"
+    echo
+    echo "NOTE:"
     echo "  Arguments for long options should be preceeded with '=' not space. Ex: --size=25G"
-    echo "  Mandatory options: --base-vm, --prefix"
+    echo "  Mandatory options for cloning & prepping VM: --base-vm, --prefix"
+    echo "  Mandatory options for attaching disks to VM: --attach-disks, --prefix, --disks"
+    echo "  Options --base-vm and --attach-disks are mutually exclusive"
+    echo
     exit 1
 }
 
@@ -210,10 +235,8 @@ function compatibility_check() {
     host_ver=$(awk -F':' '{print $5}' /etc/system-release-cpe)
     guest_ver=$(virt-cat -d $BASE_VM /etc/system-release-cpe | awk -F':' '{print $5}')
 
-    # Pool path, (if not using default pool, it should be changed in below regex accordingly)
-    pool_path=$(virsh pool-dumpxml default | grep -Po '(?<=path>).*?(?=<)')
     if (( $( echo "$host_ver < $guest_ver" | bc -l ) )); then
-        cd $pool_path
+        cd $POOL_PATH
         if [ ! -d appliance ]; then
             curl -OL https://download.libguestfs.org/binaries/appliance/appliance-1.40.1.tar.xz
             tar xvfJ appliance-1.40.1.tar.xz
@@ -230,32 +253,15 @@ function perform_op() {
     # Options that needs to be enabled, preserve SSH related info
     ops=$(virt-sysprep --list-operations | grep -Pv 'ssh-userdir|ssh-hostkeys' | awk '{ printf "%s,", $1}' | sed 's/,$//')
 
-    if virsh domblklist $BASE_VM | tail -2 | awk '{print $1}' | tr -d '\n' | grep ^s
-    then
-        dtype='sd'
-    else
-        dtype='vd'
-    fi
 
-    declare -A dict
-    counter=1
-
-    # Disk mapping, assuming no disks are attached to base VM
-    for i in {b..z}
-    do
-        dict["$counter"]=$i
-        counter=$((counter + 1))
-    done
-
+    VMS=$((VMS+START_INDEX-1))
     vm_names=()
-    VMS=$((VMS+INDEX-1))
-    for i in $(seq $INDEX $VMS)
+    for i in $(seq $START_INDEX $VMS)
     do
-        vm_names+=("${PREFIX}${i}")
-    done
+        name="${PREFIX}${i}"
 
-    for name in "${vm_names[@]}"
-    do
+        vm_names+=("$name")
+
         # Clone
         virt-clone --original "$BASE_VM" --name $name --auto-clone
 
@@ -272,12 +278,7 @@ function perform_op() {
         # Create and attach disks
         if [[ $DISKS -ge 1 ]]
         then
-            for i in $(seq 1 $DISKS)
-            do
-                qemu-img create -o preallocation=metadata -f qcow2 $pool_path/"$name-$i" $SIZE
-                sleep .2
-                virsh attach-disk $name --source $pool_path/"$name-$i" --target "${dtype}${dict[$i]}" --driver qemu --subdriver qcow2 --persistent
-            done
+            attach_disks_to_vm "$name"
         fi
     done
 
@@ -382,6 +383,61 @@ function create_vms() {
     echo "END"
 }
 
+function attach_disks_to_vm () {
+
+    vm="$1"
+
+    last_disk=$(virsh domblklist $vm | tail -2 | awk '{print $1}' | tr -d '\n')
+    if echo $last_disk | grep ^s
+    then
+        dtype='sd'
+    else
+        dtype='vd'
+    fi
+
+    last_char=${last_disk:2}
+    count=0
+    for key in ${!CHAR_MAP[*]}
+    do
+        if [[ ${CHAR_MAP[$key]} -le ${CHAR_MAP[$last_char]} ]];
+        then
+            count=$((count+1))
+            continue
+        fi
+
+        if [[ ${CHAR_MAP[$key]} -gt $((count+DISKS)) ]]
+        then
+            break
+        fi
+
+        qemu-img create -o preallocation=metadata -f qcow2 $POOL_PATH/"$vm-${CHAR_MAP[$key]}" $SIZE
+        sleep .2
+        virsh attach-disk $vm --source $POOL_PATH/"$vm-${CHAR_MAP[$key]}" --target "${dtype}${key}" --driver qemu --subdriver qcow2 --persistent
+    done
+
+}
+
+function attach_disks() {
+
+    echo "BEGIN"
+
+    VMS=$((VMS+START_INDEX-1))
+    for i in $(seq $START_INDEX $VMS)
+    do
+        name="${PREFIX}${i}"
+        if ! virsh list --all | grep "$name"
+        then
+            echo Domain name "$name" is not found in 'virsh list --all'
+        fi
+
+        attach_disks_to_vm "$name"
+
+    done
+
+    echo "END"
+
+}
+
 function parse_args() {
 
     die() {
@@ -407,31 +463,51 @@ function parse_args() {
             OPTARG="${OPTARG#=}"
         fi
         case "$OPT" in
-            h | help    )   help;;
-            b | base-vm )   needs_arg; BASE_VM=$OPTARG;;
-            i | base-ip )   needs_arg; BASE_IP=$OPTARG;;
-            p | prefix  )   needs_arg; PREFIX=$OPTARG;;
-            x | index   )   needs_arg; INDEX=$OPTARG;;
-            n | vms     )   needs_arg; VMS=$OPTARG;;
-            d | disks   )   needs_arg; DISKS=$OPTARG;;
-            s | size    )   needs_arg; SIZE=$OPTARG;;
-            g | get-ip  )   needs_arg; GET_IP=$OPTARG;;
-            :           )   echo No arugment supplied for ${OPTARG} option; help;;
-            ??*         )   die Bad long option --$OPT; help;;
-            ?           )   die Bad short option -$OPTARG; help;;
+            h | help            )   help;;
+            a | attach-disks    )   needs_arg; ATTACH_DISKS=$OPTARG;;
+            b | base-vm         )   needs_arg; BASE_VM=$OPTARG;;
+            i | base-ip         )   needs_arg; BASE_IP=$OPTARG;;
+            p | prefix          )   needs_arg; PREFIX=$OPTARG;;
+            x | start-index     )   needs_arg; START_INDEX=$OPTARG;;
+            n | vms             )   needs_arg; VMS=$OPTARG;;
+            d | disks           )   needs_arg; DISKS=$OPTARG;;
+            s | size            )   needs_arg; SIZE=$OPTARG;;
+            g | get-ip          )   needs_arg; GET_IP=$OPTARG;;
+            :                   )   echo No arugment supplied for ${OPTARG} option; help;;
+            ??*                 )   die Bad long option --$OPT; help;;
+            ?                   )   die Bad short option -$OPTARG; help;;
         esac
     done
 
-    for value in "$BASE_VM" "$PREFIX"
-    do
-        if [[ "$value" == "NULL" ]]
+
+    if [[ "$BASE_VM" != "NULL" && "$ATTACH_DISKS" == "yes" ]]
+    then
+        echo "Options: --base-vm and --attach-disks shouldn't be provided at the same time"
+        help
+    fi
+
+    if [[ "$BASE_VM" != "NULL" ]]
+    then
+        for value in "$BASE_VM" "$PREFIX"
+        do
+            if [[ "$value" == "NULL" ]]
+            then
+                echo "Mandatory options: --base-vm, --prefix"
+                help
+            fi
+        done
+    fi
+
+    if [[ "$ATTACH_DISKS" == "yes" ]]
+    then
+        if [[ "$PREFIX" == "NULL" || "$DISKS" == 0 ]]
         then
-            echo "Mandatory options: --base-vm, --prefix"
+            echo "Prefix should be supplied for attaching disks to VM starting with that prefix, along with number of disks"
             help
         fi
-    done
+    fi
 
-    if [[ $VMS -lt 1 || $DISKS -lt 0 || $INDEX -lt 1 ]]
+    if [[ $VMS -lt 1 || $DISKS -lt 0 || $START_INDEX -lt 1 ]]
     then
         echo "VMs should be >= 1, disks should be >= 0, index should be >= 1"
         help
@@ -439,7 +515,12 @@ function parse_args() {
 
     echo "Final arguments: BASE_VM: $BASE_VM; BASE_IP: $BASE_IP; PREFIX: $PREFIX; VMS: $VMS; DISKS: $DISKS; SIZE: $SIZE; GET_IP: $GET_IP"
 
-    create_vms
+    if [[ "$ATTACH_DISKS" == "yes" ]]
+    then
+        attach_disks
+    else
+        create_vms
+    fi
 
 }
 
