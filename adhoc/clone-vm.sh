@@ -40,6 +40,15 @@
 # - Checking for available space isn't implemented
 # - No error recovery is inbuilt (just backoff if something goes wrong)
 
+# Examples:
+# 1. Single VM: `./clone-vm.sh --base-vm=rhel84 --prefix=84c --vms=1`
+# 2. Single VM with same prefix: `./clone-vm.sh --base-vm=rhel84 --prefix=84c --vms=1 --start-index=2`
+# 3. Two VMs with 2 disks attached to each VM: `./clone-vm.sh --base-vm=rhel84 --prefix=84s --vms=2 --disks=2`
+# 4. Two VMs with 2 disks of 25G attached to each VM with same prefix and different start index: `./clone-vm.sh --base-vm=rhel84 --prefix=84s --vms=2 --disks=2 --start-index=3 --size=25G`
+# 5. Attach 2 disks to an existing VM: `./clone-vm.sh --attach-disks=yes --prefix=84c --vms=1 --disks=2`
+# 6. Attach 2 disks of 25G attached to each VM with same prefix and different start index: `./clone-vm.sh --attach-disks=yes --prefix=84c --vms=1 --disks=2 --start-index=2 --size=25G`
+# Option --start-index is used to refer to starting VM (along with PREFIX) and value of --vms is added to this index to arrive at total number of VMs
+
 # Notes:
 # POOL_PATH=$(virsh pool-dumpxml default | grep -Po '(?<=path>).*?(?=<)')
 # for i in `virsh list --all | grep -vP 'centos|Name|leela|--' | awk '{print $2}'`; do virsh destroy $i; virsh undefine $i; rm -f $POOL_PATH/$i*; done;
@@ -86,7 +95,7 @@ function help() {
     echo
     echo "Usage: ${0} [--option=argument] or ${0} [-o argument]"
     echo "  -h | --help help    display help"
-    echo "  -a | --attach-disks Attach disks to a running VM (Default: no)"
+    echo "  -a | --attach-disks Attach disks to a running VM, this is a separate functionality (Default: no)"
     echo "  -b | --base-vm      Name of base VM as displayed in 'virsh list'"
     echo "  -i | --base-ip      IPv4 address of base VM"
     echo "  -p | --prefix       Prefix of new VMs (1, 2, 3 ... will be appended to this prefix)"
@@ -513,7 +522,7 @@ function parse_args() {
         help
     fi
 
-    echo "Final arguments: BASE_VM: $BASE_VM; BASE_IP: $BASE_IP; PREFIX: $PREFIX; VMS: $VMS; DISKS: $DISKS; SIZE: $SIZE; GET_IP: $GET_IP"
+    echo "Final arguments: ATTACH_DISKS: $ATTACH_DISKS; BASE_VM: $BASE_VM; BASE_IP: $BASE_IP; PREFIX: $PREFIX; START_INDEX: $START_INDEX; VMS: $VMS; DISKS: $DISKS; SIZE: $SIZE; GET_IP: $GET_IP"
 
     if [[ "$ATTACH_DISKS" == "yes" ]]
     then
