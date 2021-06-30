@@ -102,7 +102,7 @@ EOF
                       wipefs -a -f /dev/sd$i; mkfs.xfs /dev/sd$i;
                       mkdir -p /mnt/sd$i; mount /dev/sd$i /mnt/sd$i;
                   done;
-                  umount -l /mnt/sde; wipefs -a -f /dev/sde;
+                  # umount -l /mnt/sde; wipefs -a -f /dev/sde;
                   break ;;
               No ) echo "Proceeding without wiping devices, may face issues while using them in k3d cluster"; break;;
           esac
@@ -116,7 +116,7 @@ EOF
   k3d cluster create test -a $agents \
       -v /tmp/k3d/kubelet/pods:/var/lib/kubelet/pods:shared \
       -v /mnt/sdc:/mnt/sdc -v /mnt/sdd:/mnt/sdd \
-      -v /dev/sde:/dev/sde \
+      -v /mnt/sde:/mnt/sde \
       -v ~/.k3d/registries.yaml:/etc/rancher/k3s/registries.yaml \
       --k3s-server-arg "--kube-apiserver-arg=feature-gates=EphemeralContainers=true" \
       --k3s-server-arg --disable=local-storage
