@@ -8,6 +8,7 @@ prg="teardown"
 pull="yes"
 agents=3
 kadalu="yes"
+kubectx k3d-test || exit 1
 
 # Similar to https://github.com/RedHatQE/pylero/blob/master/gen_docs.sh script
 usage()
