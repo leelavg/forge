@@ -4,19 +4,19 @@
 
 # ===== STANDALONE SCRIPT ===== NO NEED TO CLONE WHOLE REPO =====
 
-# Current Status: USABLE
-# Total Steps: create_scripts, prep_kvm, prep_base, compatibility_check, perform_op and write_ips
-# Untested Steps [TODO]: prep_base and write_ips
+# Current Status: STABLE
+# Total Steps [cloning VMs]: create_scripts, compatibility_check, perform_op
+# Total Steps [Attaching disks]: attach_disks
 
 # Sample usage:
 # bash clone-vm.sh --base-vm=centos7-34 --prefix=7-34 --vms=3
 # For help run: bash clone-vm.sh -h
 
 # BEGIN - Existing base image
-# END - Create VMs from base image, attach disks (optional) and write IPs to a file (optional)
+# END - Create VMs from base image and attach disks (optional)
 
 # Required RPMs on KVM :
-# yum install virt-install libvirt libvirt-client libguestfs libguestfs-tools net-tools bc
+# yum install virt-install libvirt libvirt-client libguestfs libguestfs-tools bc expect
 
 # Scope:
 # - Clone a base VM (either ISO or PXE booted), attach disks
@@ -50,8 +50,12 @@
 # Option --start-index is used to refer to starting VM (along with PREFIX) and value of --vms is added to this index to arrive at total number of VMs
 
 # Notes:
+# 1. Destroy and undefine VMs
 # POOL_PATH=$(virsh pool-dumpxml default | grep -Po '(?<=path>).*?(?=<)')
-# for i in `virsh list --all | grep -vP 'centos|Name|leela|--' | awk '{print $2}'`; do virsh destroy $i; virsh undefine $i; rm -f $POOL_PATH/$i*; done;
+# for i in `virsh list --all | awk '{print $2}' | grep -P '^(7|8)'`; do virsh destroy $i; virsh undefine $i; rm -f $POOL_PATH/$i*; done;
+# 2. IPs of VMs:
+# for vm in `virsh list --all | awk '{print $2}' | grep -P '^(7|8)'`; do expect -c "spawn virsh console $vm --force; expect \"Escape\"; send \"\r\"; expect \"login:\"; send \"^]\r\"; exit 0" | grep -Po 'dhcp.*?\s' | awk -v vm=$vm '{print $1, vm}'; done
+#
 
 
 # Break on any failure
@@ -65,7 +69,6 @@ START_INDEX=1
 VMS=1
 DISKS=0
 SIZE="10G"
-GET_IP="no"
 TEMP_DIR=$(mktemp -d)
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -104,7 +107,6 @@ function help() {
     echo "                      provided VM name is constructed using --prefix and this option (Default: 1)"
     echo "  -d | --disks        Number of disks to be attached to each VM (Default: 0)"
     echo "  -s | --size         Size of each disk, should contain Unit as well (Default: 10G)"
-    echo "  -g | --get-ip       EXPERIMENTAL, writes IPs of new VMs to a file (Default: no)"
     echo
     echo "NOTE:"
     echo "  Arguments for long options should be preceeded with '=' not space. Ex: --size=25G"
@@ -156,88 +158,6 @@ EOF
 
 }
 
-function prep_kvm() {
-
-    # Generate a SSH keypair if one doesn't exist
-    if ! [ -f ~/.ssh/id_rsa ]
-    then
-        ssh-keygen -q -t rsa -N '' -f ~/.ssh/id_rsa
-    fi
-
-}
-
-function prep_base() {
-
-    # Shutdown base vm
-    if ! virsh list --inactive | grep $BASE_VM
-    then
-        virsh shutdown $BASE_VM
-    fi
-
-    # Wait for base vm to go down
-    count=$(($(date +%s) + 30))
-    while [[ "$(date +%s)" -lt $count ]]
-    do
-        ret=$(timeout 5 ping -c 5 $BASE_IP 1>/dev/null; echo $?)
-        if [[ $ret -ne 0 ]]
-        then
-            break
-        fi
-    done
-
-    # Check if base vm was already prepped before
-    ret=$(virt-cat -d $BASE_VM /etc/fstab.uuid >/dev/null 2>&1 && echo 0 || echo 1)
-    if [[ $ret -eq 0 ]]
-    then
-        # VM is already prepped no need for all the extra work
-        return 0
-    fi
-
-    # Need to copy and run startup.sh in the base VM
-    virt-copy-out -d $BASE_VM /root/.ssh/authorized_keys . || touch authorized_keys
-
-    # Add KVM SSH Key
-    cat ~/.ssh/id_rsa.pub >> authorized_keys
-
-    # Copy appended key into base vm
-    virt-copy-in -d $BASE_VM authorized_keys /root/.ssh
-
-    # Copy startup.sh into base vm
-    virt-copy-in -d $BASE_VM startup.sh /root
-
-    # Start base vm
-    virsh start $BASE_VM
-
-    # Wait for base vm to come online
-    count=$(($(date +%s) + 60))
-    while [[ "$(date +%s)" -lt $count ]]
-    do
-        ret=$(timeout 5 ping -c 5 $BASE_IP 1>/dev/null; echo $?)
-        if [[ $ret -eq 0 && $ret -ne 124 ]]
-        then
-            break
-        fi
-    done
-
-    # Run startup.sh on base vm
-    ssh -o "StrictHostKeyChecking no" root@$BASE_IP "bash /root/startup.sh"
-
-    # Shutdown VM
-    virsh shutdown $BASE_VM
-
-    # Wait for base vm to go down
-    count=$(($(date +%s) + 30))
-    while [[ "$(date +%s)" -lt $count ]]
-    do
-        ret=$(timeout 5 ping -c 5 $BASE_IP 1>/dev/null; echo $?)
-        if [[ $ret -ne 0 ]]
-        then
-            break
-        fi
-    done
-
-}
-
 function compatibility_check() {
 
     # centos8 base on centos7 KVM conflicts with XFS file system forward compatibility
@@ -278,9 +198,6 @@ function perform_op() {
         # if `--selinux-relabel` is removed then `firshboot` script will not be trigerred
         virt-sysprep -d $name --selinux-relabel --enable $ops --firstboot ./change_uuid.sh
 
-        # Set VM autostart
-        virsh autostart $name
-
         # Start VM and attach disks
         virsh start $name
 
@@ -293,73 +210,6 @@ function perform_op() {
 
 }
 
-function write_ips() {
-
-    # Try to get newly created vm ips from arp cache
-
-    # Clean ARP Cache
-    ip -s -s neigh flush all
-
-    # Wait for arp cache (for ~2min) to have entries =~ number of newly created VMs
-    count=$(($(date +%s) + 120))
-    while [[ "$(date +s)" -lt $count ]]
-    do
-        ret=$(arp -e | grep -c ^dhcp)
-        if [[ $ret -ge $VMS ]]
-        then
-            break
-        fi
-    done
-
-    # Let's try to get maximum number of IPs even if arp cache isn't as expected
-    ips=($(arp -e | grep ^dhcp | awk '{print $1}'))
-
-    declare -A domain_mac
-
-    for name in "${vm_names[@]}"
-    do
-        # This'll be of eth mac address but not of bridge's
-        mac=$(virsh dumpxml $name | grep 'mac address' | awk -F\' '{print $2}')
-        domain_mac["$name"]="$mac"
-    done
-
-    filter=()
-    for key in "${!ips[@]}"
-    do
-        # Try connecting to all the dhcp entries
-        host=${ips[$key]/\.lab.*/}
-        out=$(timeout 3 ssh -o "StrictHostKeyChecking no" -q root@$host exit && echo SUCCESS || echo FAIL)
-        if [[ $out == "SUCCESS" ]]
-        then
-            filter+=("$host")
-        fi
-    done
-
-    declare -A ip_mac
-    for host in "${filter[@]}"
-    do
-        mac=$(ssh -o "StrictHostKeyChecking no" -q root@$host bash << 'EOF'
-cat /sys/class/net/$(ip addr | awk -F': ' '/state UP/ {print $2}' | grep ^e)/address
-EOF
-)
-        ip_mac["$mac"]="$host"
-    done
-
-    # Finally get IPs corresponding to Domain names
-    echo "# Below are the list of IPs found from arp cache" > "ip-$TIME.log"
-    for key in "${!domain_mac[@]}"
-    do
-        value=${domain_mac[$key]}
-        if [ -v ip_mac["$value"] ]
-        then
-            echo "${ip_mac[$value]} $key" >> "ip-$TIME.log"
-        else
-            echo "Unable to find IP for '$key'" >> "ip-$TIME.log"
-        fi
-    done
-}
-
-
 function create_vms() {
 
     echo "BEGIN"
@@ -369,12 +219,6 @@ function create_vms() {
     # Creation of scripts to be run on base and new VMs
     create_scripts
 
-    # Operations on KVM hypervisor
-    # prep_kvm
-
-    # Operation on base vm
-    # prep_base
-
     # Checks before proceeding with cloning
     compatibility_check
 
@@ -382,12 +226,6 @@ function create_vms() {
     perform_op
 
     cd $BASE_DIR
-
-    if [[ $GET_IP == "yes" ]]
-    then
-        # EXPERIMENTAL: Get newly created VM IPs
-        write_ips
-    fi
 
     echo "END"
 }
@@ -481,7 +319,6 @@ function parse_args() {
             n | vms             )   needs_arg; VMS=$OPTARG;;
             d | disks           )   needs_arg; DISKS=$OPTARG;;
             s | size            )   needs_arg; SIZE=$OPTARG;;
-            g | get-ip          )   needs_arg; GET_IP=$OPTARG;;
             :                   )   echo No arugment supplied for ${OPTARG} option; help;;
             ??*                 )   die Bad long option --$OPT; help;;
             ?                   )   die Bad short option -$OPTARG; help;;
@@ -522,7 +359,7 @@ function parse_args() {
         help
     fi
 
-    echo "Final arguments: ATTACH_DISKS: $ATTACH_DISKS; BASE_VM: $BASE_VM; BASE_IP: $BASE_IP; PREFIX: $PREFIX; START_INDEX: $START_INDEX; VMS: $VMS; DISKS: $DISKS; SIZE: $SIZE; GET_IP: $GET_IP"
+    echo "Final arguments: ATTACH_DISKS: $ATTACH_DISKS; BASE_VM: $BASE_VM; BASE_IP: $BASE_IP; PREFIX: $PREFIX; START_INDEX: $START_INDEX; VMS: $VMS; DISKS: $DISKS; SIZE: $SIZE"
 
     if [[ "$ATTACH_DISKS" == "yes" ]]
     then
