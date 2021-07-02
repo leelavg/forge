@@ -1,20 +1,21 @@
 -
   name: 'Installing Gluster on RHEL 8 Clients'
-  hosts: 8c
+  hosts: rhel8c
   vars_files:
     - local-vars.yml
-    - local-links.yml
+    # - local-links.yml
   tasks:
     -
       name: 'Enabling required repos'
       rhsm_repository: 'name={{_8cb}} state=enabled'
-    -
-      name: 'Add local repo links'
-      command: 'dnf config-manager --add-repo="{{_8cl}}"'
-    -
-      name: 'Clean all cache'
-      command: 'dnf clean all'
+    # -
+    #   name: 'Add local repo links'
+    #   command: 'dnf config-manager --add-repo="{{_8cl}}"'
+    # -
+    #   name: 'Clean all cache'
+    #   command: 'dnf clean all'
     -
       name: 'Install required packages'
-      yum: 'name={{_8cp}} state=present disable_gpg_check=yes'
+      yum: 'name={{_8cp}} state=present'
+      # yum: 'name={{_8cp}} state=present disable_gpg_check=yes'
 

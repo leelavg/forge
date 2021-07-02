@@ -1,14 +1,15 @@
 -
   name: 'Enabling firewall rules for gluster'
-  hosts:
-    - rhel8s
-    - rhel7s
+  hosts: rhels
   vars_files:
     - local-vars.yml
   tasks:
     -
       name: 'Start glusterd'
       systemd: 'state=started name=glusterd'
+    -
+      name: 'Start firewalld'
+      systemd: 'state=started name=firewalld'
     -
       name: 'Adding firewall rules'
       command: 'firewall-cmd --zone=public --add-service={{item}}'

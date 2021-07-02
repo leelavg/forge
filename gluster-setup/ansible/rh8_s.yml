@@ -3,17 +3,18 @@
   hosts: rhel8s
   vars_files:
     - local-vars.yml
-    - local-links.yml
+    # - local-links.yml
   tasks:
     -
       name: 'Enabling required repos'
       rhsm_repository: 'name={{_8sb}} state=enabled'
-    -
-      name: 'Add local repo links'
-      command: 'dnf config-manager --add-repo="{{_8sl}}"'
-    -
-      name: 'Clean all cache'
-      command: 'dnf clean all'
+    # -
+    #   name: 'Add local repo links'
+    #   command: 'dnf config-manager --add-repo="{{_8sl}}"'
+    # -
+    #   name: 'Clean all cache'
+    #   command: 'dnf clean all'
     -
       name: 'Install required packages'
-      yum: 'name={{_8sp}} state=present disable_gpg_check=yes'
+      yum: 'name={{_8sp}} state=present'
+      # yum: 'name={{_8sp}} state=present disable_gpg_check=yes'
