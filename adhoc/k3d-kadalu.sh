@@ -8,7 +8,6 @@ prg="teardown"
 pull="yes"
 agents=3
 kadalu="yes"
-kubectx k3d-test || exit 1
 
 # Similar to https://github.com/RedHatQE/pylero/blob/master/gen_docs.sh script
 usage()
@@ -100,10 +99,8 @@ EOF
           case $yn in
               Yes )
                   for i in $(eval echo $dev); do
-                      wipefs -a -f /dev/sd$i; mkfs.xfs /dev/sd$i;
-                      mkdir -p /mnt/sd$i; mount /dev/sd$i /mnt/sd$i;
+                      wipefs -a -f /dev/sd$i;
                   done;
-                  # umount -l /mnt/sde; wipefs -a -f /dev/sde;
                   break ;;
               No ) echo "Proceeding without wiping devices, may face issues while using them in k3d cluster"; break;;
           esac
@@ -116,8 +113,8 @@ EOF
   # Create k3d test cluster
   k3d cluster create test -a $agents \
       -v /tmp/k3d/kubelet/pods:/var/lib/kubelet/pods:shared \
-      -v /mnt/sdc:/mnt/sdc -v /mnt/sdd:/mnt/sdd \
-      -v /mnt/sde:/mnt/sde \
+      -v /dev/sdc:/dev/sdc -v /dev/sdd:/dev/sdd \
+      -v /dev/sde:/dev/sde \
       -v ~/.k3d/registries.yaml:/etc/rancher/k3s/registries.yaml \
       --k3s-server-arg "--kube-apiserver-arg=feature-gates=EphemeralContainers=true" \
       --k3s-server-arg --disable=local-storage
@@ -139,6 +136,8 @@ EOF
 fi
 
 if [[ $prg == "teardown" ]]; then
+
+  kubectx k3d-test || exit 1
 
   # Remove sanity pods if there are any
   kubectl delete ds -l name=sanity-ds --wait=true
