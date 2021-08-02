@@ -102,7 +102,7 @@ EOF
                       wipefs -a -f /dev/sd$i;
                   done;
                   break ;;
-              No ) echo "Proceeding without wiping devices, may face issues while using them in k3d cluster"; break;;
+              No ) echo "Proceeding without wiping devices may face issues while using them in k3d cluster for kadalu"; break;;
           esac
       done
   fi
@@ -120,7 +120,7 @@ EOF
       --k3s-server-arg --disable=local-storage
 
   # Import all the docker images into k3d cluster
-  k3d image import -k /tmp/allinone.tar -c test
+  k3d image import -t -k /tmp/allinone.tar -c test
 
   # Attach registry network to k3d
   docker network connect k3d-test registry.localhost
