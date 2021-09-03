@@ -131,6 +131,7 @@ EOF
   if [ $kadalu == "yes" ]; then
       # Set 'verbose' to 'yes'
       curl -s https://raw.githubusercontent.com/kadalu/kadalu/devel/manifests/kadalu-operator.yaml | sed 's/"no"/"yes"/' | kubectl apply -f -
+      curl -s https://raw.githubusercontent.com/kadalu/kadalu/devel/manifests/csi-nodeplugin.yaml | sed 's/"no"/"yes"/' | kubectl apply -f -
   fi
 
 fi
