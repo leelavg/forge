@@ -1,8 +1,7 @@
 #!/bin/bash
 # DONOT RUN WITHOUT CHECKING THE SCRIPT
 
-negate='test-|registry|alpine|k3|local|<none>|act-|moby|binfmt'
-only='operator|server|csi'
+only='topolvm'
 options="mhp:a:t:k:"
 prg="teardown"
 pull="yes"
@@ -113,11 +112,14 @@ EOF
   # Create k3d test cluster
   k3d cluster create test -a $agents \
       -v /tmp/k3d/kubelet/pods:/var/lib/kubelet/pods:shared \
-      -v /dev/sdc:/dev/sdc -v /dev/sdd:/dev/sdd \
-      -v /dev/sde:/dev/sde \
+      -v /dev/sdc:/dev/sdc@server:0 -v /dev/sdd:/dev/sdd@agent:0 \
+      -v /dev/sde:/dev/sde@agent:0 \
       -v ~/.k3d/registries.yaml:/etc/rancher/k3s/registries.yaml \
-      --k3s-server-arg "--kube-apiserver-arg=feature-gates=EphemeralContainers=true" \
-      --k3s-server-arg --disable=local-storage
+      -v /dev/loop0:/dev/loop0 \
+      -v /usr/bin/lsblk:/usr/bin/lsblk \
+      -v /usr/sbin/lvm:/usr/sbin/lvm \
+      --k3s-arg "--kube-apiserver-arg=feature-gates=EphemeralContainers=true@server:*" \
+      --k3s-arg "--disable=local-storage@server:*"
 
   # Import all the docker images into k3d cluster
   k3d image import -t -k /tmp/allinone.tar -c test
@@ -157,6 +159,7 @@ if [[ $prg == "teardown" ]]; then
   k3d cluster delete test
 
   # Unmount any left overs of k3d
+  sleep 2
   diff <(df -ha | grep pods | awk '{print $NF}') <(df -h | grep pods | awk '{print $NF}') | awk '{print $2}' | xargs umount -l
 
   # Cleanup mount point
