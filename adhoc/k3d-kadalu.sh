@@ -2,6 +2,7 @@
 # DONOT RUN WITHOUT CHECKING THE SCRIPT
 
 only='topolvm'
+only='kadalu-operator|server|csi'
 options="mhp:a:t:k:"
 prg="teardown"
 pull="yes"
