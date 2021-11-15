@@ -1,13 +1,13 @@
 -
   name: 'Installing Gluster on RHEL 7 Servers'
-  hosts: rhel7s
+  hosts: rhel7t
   vars_files:
     - local-vars.yml
     # - local-links.yml
   tasks:
     -
       name: 'Enabling required repos'
-      rhsm_repository: 'name={{_7sb}} state=enabled'
+      rhsm_repository: 'name={{_7tb}} state=enabled'
     -
       name: 'Install yum-config-manager'
       yum: 'name=yum-utils state=present'
@@ -20,7 +20,3 @@
     -
       name: 'yum Update the system'
       yum: 'name=* state=latest'
-    -
-      name: 'Install required packages'
-      yum: 'name={{_7sp}} state=latest'
-      # yum: 'name={{_7sp}} state=present disable_gpg_check=yes'

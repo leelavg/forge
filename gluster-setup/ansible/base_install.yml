@@ -1,6 +1,6 @@
 -
   name: 'Base config for installing Gluster on all machines'
-  hosts: all
+  hosts: rhel7t
   vars_files:
     - local-vars.yml
   tasks:

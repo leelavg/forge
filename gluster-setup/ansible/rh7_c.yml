@@ -18,6 +18,9 @@
     #   name: 'Clean all cache'
     #   command: 'yum clean all'
     -
+      name: 'yum Update the system'
+      yum: 'name=* state=latest'
+    -
       name: 'Install required packages'
-      yum: 'name={{_7cp}} state=present'
+      yum: 'name={{_7cp}} state=latest'
       # yum: 'name={{_7cp}} state=present disable_gpg_check=yes'

@@ -15,7 +15,10 @@
     #   name: 'Clean all cache'
     #   command: 'dnf clean all'
     -
+      name: 'DNF Update the system'
+      dnf: 'name=* state=latest'
+    -
       name: 'Install required packages'
-      yum: 'name={{_8cp}} state=present'
+      yum: 'name={{_8cp}} state=latest'
       # yum: 'name={{_8cp}} state=present disable_gpg_check=yes'
 
