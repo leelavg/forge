@@ -15,9 +15,9 @@ oc="oc -n$ns "
 master="master-0"
 
 # 10GB disks are attached to the node
-size="10"
+size=10
 
-function attach_disks() {
+function create_attach_disks() {
 
   echo -- take note of master node instance id
   local ec2=$(
@@ -34,12 +34,12 @@ function attach_disks() {
   )
 
   # subtract root disk count
-  exist=$(($exist - 1))
+  exist=$((exist - 1))
 
   [[ $exist -ge $disks ]] && echo Instance already has $exist volumes attached && return
 
   local avail=$(aws ec2 describe-volumes | jq -r '.Volumes[].State' | grep -c available)
-  local create=$(($disks - $avail - $exist))
+  local create=$((disks - avail - exist))
   echo -- create $create disks
   for _ in $(seq 1 $create); do
     aws ec2 create-volume --availability-zone ap-south-1a --size $size --volume-type standard
@@ -51,15 +51,15 @@ function attach_disks() {
   while [[ $avail -lt $create ]]; do
     avail=$(aws ec2 describe-volumes | jq -r '.Volumes[].State' | grep -c available)
     [[ $timeout -lt $(date +%s) ]] && echo ----- EC2 volumes are not up && exit 1
-    sleep 5
+    sleep 3
   done
 
   echo -- attach volumes to the instance: /dev/sd{c..f}
   local vols=($(aws ec2 describe-volumes | jq -r '.Volumes[] | select(.State=="available") | .VolumeId'))
   local ascii=($(printf '%b ' '\'{143..146}))
-  for i in $(seq 0 $disks); do
+  for i in $(seq 0 $((disks - 1))); do
     aws ec2 attach-volume --volume-id "${vols[$i]}" --instance-id "$ec2" --device /dev/sd"${ascii[$i]}"
-    sleep 5
+    sleep 3
   done
 
   echo -- verify volume attachment from aws cli
@@ -74,6 +74,29 @@ function attach_disks() {
     sleep 2
   done
 
+}
+
+function detach_delete_disks() {
+
+  echo -- take note of master node instance id
+  local ec2=$(
+    aws ec2 describe-instances |
+      jq -r '.Reservations[].Instances[]|.InstanceId+" "+(.Tags[] | select(.Key == "Name").Value)' |
+      grep "$master" | awk '{print $1}'
+  )
+
+  echo -- take note of disks of size $size G attached to $ec2
+  local vols=($(aws ec2 describe-volumes | jq -r --arg id "$ec2" '.Volumes[]|select(.Size==10)|.Attachments[]|select(.InstanceId==$id).VolumeId'))
+
+  echo -- detach and delete volume
+  for vol in "${vols[@]}"; do
+    aws ec2 detach-volume --volume-id $vol --instance-id $ec2
+    sleep 2
+  done
+
+  for vol in "${vols[@]}"; do
+    aws ec2 delete-volume --volume-id $vol
+  done
 }
 
 function operator() {
@@ -97,7 +120,7 @@ function operator() {
   )"
   local operator="$(
     if ! [ -e /tmp/operator-top.yaml ]; then curl -sL $repo/operator-openshift.yaml -o /tmp/operator-top.yaml; fi
-    sed -e "s,image:.*$,image: $pr_image,g" /tmp/operator-top.yaml
+    sed -e "s,image:.*$,image: $pr_image,g" -e '$a\          imagePullPolicy: Always' /tmp/operator-top.yaml
   )"
   # we don't need discovery before deploying CR
   # local setting="$(
@@ -157,7 +180,7 @@ $meta
     deviceClasses:
       - nodeName: "${nodes[0]}"
         classes:
-          - volumeGroup: test-master-0
+          - volumeGroup: test-master
             className: hdd
             default: true
             devices: 
@@ -365,15 +388,23 @@ function validate() {
 
       # $2 = string, name of volumegroup
       # $3 = num, number of expected disks in the volume group
-      # TODO: Poll for deployment creation
-      sleep 10
+
+      local timeout=$(($(date +%s) + 30))
+      while [[ \
+        $($oc get deploy/topolvm-controller --ignore-not-found -o name | wc -l) -eq 0 || \
+        $($oc get job -l 'app.kubernetes.io/name=prepare-volume-group' --ignore-not-found -o name | wc -l) -eq 0 || \
+        $($oc get deploy -l 'app.kubernetes.io/name=topolvm-node' --ignore-not-found -o name | wc -l) -eq 0 ]]; do
+        [[ $timeout -lt $(date +%s) ]] && echo ----- Resources are not created after deploying $1 && exit 1
+        sleep 2
+      done
+
       $oc wait --for=condition=available deploy/topolvm-controller --timeout=30s || {
         echo ----- Topolvm CSI Controller is not up && exit 1
       }
-      $oc wait --for=condition=complete job -l app.kubernetes.io/name=prepareVolumeGroup --timeout=30s || {
+      $oc wait --for=condition=complete job -l 'app.kubernetes.io/name=prepare-volume-group' --timeout=30s || {
         echo ----- Preparing Volume Group failed && exit 1
       }
-      $oc wait --for=condition=available deploy -l app.kubernetes.io/name=topolvm-node --timeout=30s || {
+      $oc wait --for=condition=available deploy -l 'app.kubernetes.io/name=topolvm-node' --timeout=30s || {
         echo ----- Topolvm CSI Node is not up && exit 1
       }
 
@@ -415,8 +446,8 @@ function validate() {
       done
       [[ $($oc get logicalvolumes.topolvm.cybozu.com $pv_name -ojsonpath={'.status.currentSize'}) != "$3" ]] && echo ----- logicalvolumes/$pv_name size is not matching spec $3 && exit 1
       local lv_pv=$($oc get logicalvolumes.topolvm.cybozu.com $pv_name -ojsonpath={'.status.volumeID'})
-      local lv_node=$($oc debug node/${nodes[0]} -- chroot /host lvs $vg_name -olv_name --noheadings || awk '{print $1}')
-      [[ "$lv_pv" != "$lv_node" ]] && echo ----- pvc/$pv_name is not from volume group $vg_name && exit 1
+      local lv_node=$($oc debug node/${nodes[0]} -- chroot /host lvs $vg_name -olv_name --noheadings | awk '{print $1}')
+      [[ "$lv_pv" != "$lv_node" ]] && echo ----- pv/$pv_name is not from volume group $vg_name && exit 1
 
       ;;
 
@@ -430,7 +461,7 @@ function validate() {
 
 function deploy() {
   # $1 = string, install/uninstall
-  # $2 = string, CustomResource/PVC
+  # $2 = string, CustomResource/StorageClass/PVC
   # $3 = string, content of yaml manifest
   if [ "$1" == "install" ]; then
     echo "$3" | oc apply -f - || {
@@ -452,6 +483,12 @@ function deploy() {
         [[ -n "$out" ]] && echo ----- Unable to delete volumegroup and physical volumes && exit 1
         ;;
 
+      "StorageClass")
+        echo "$3" | oc delete -f - || {
+          echo ---- Unable to uninstall $2 manifest && exit 1
+        }
+        ;;
+
       "PVC")
         echo "$3" | oc delete -f - || {
           echo ---- Unable to uninstall $2 manifest && exit 1
@@ -460,7 +497,7 @@ function deploy() {
         ;;
 
       *)
-        echo ----- Unsupported resource supplied to be deleted && exit 1
+        echo ----- Unsupported resource $1 supplied to be deleted && exit 1
         ;;
 
     esac
@@ -480,13 +517,15 @@ function test_resource() {
 
       [[ $2 == "uninstall" ]] && return 0
 
-      validate $1 "test-master-0" "2"
-
-      local total="1"
-      if [[ $3 == 2 ]]; then
-        total="2"
+      if [[ $3 == 1 ]]; then
+        validate $1 "test-master" 2
+        validate $1 "test-master-1" 1
+      elif [[ $3 == 2 ]]; then
+        validate $1 "test-master" 2
+        validate $1 "test-master-1" 2
+      else
+        validate $1 "test-master" 4
       fi
-      validate $1 "test-master-1" $total
       ;;
 
     "StorageClass")
@@ -505,11 +544,26 @@ function test_resource() {
       manifest="$(get_pvc "sample-pvc" $3 $4 $5)"
       deploy $2 $1 "$manifest"
       [[ $2 == "uninstall" ]] && return 0
-      validate $1 "test-master-0" $4
+
+      local vg_name
+      case "$5" in
+        "sc-imm-spec")
+          vg_name="test-master-1"
+          ;;
+        "sc-imm-def" | "sc-wffc-def")
+          vg_name="test-master"
+          ;;
+        *)
+          echo ----- Unsupported resource $5 supplied to validate $1
+          ;;
+      esac
+
+      validate $1 $vg_name $4
+
       ;;
 
     *)
-      echo ----- Unsupported resource supplied to be validated && exit 1
+      echo ----- Unsupported resource $1 supplied to be validated && exit 1
       ;;
   esac
 
@@ -519,36 +573,110 @@ function start_test() {
   # Create a CustomResource and perform testing corresponding to that CR
 
   local cr_type=1
+  local sc_name="sc-imm-def"
+
+  echo --- CR$cr_type-install
   test_resource "CustomResource" "install" $cr_type
 
-  local sc_name="sc-imm-def"
+  echo --- CR$cr_type-$sc_name-install
   test_resource "StorageClass" "install" $sc_name
+
+  echo --- CR$cr_type-$sc_name-PVC-FS-install
   test_resource "PVC" "install" "Filesystem" "1Gi" $sc_name
+
+  echo --- CR$cr_type-$sc_name-PVC-FS-expand
   test_resource "PVC" "install" "Filesystem" "2Gi" $sc_name
+
+  echo --- CR$cr_type-$sc_name-PVC-FS-uninstall
   test_resource "PVC" "uninstall" "Filesystem" "2Gi" $sc_name
+
+  echo --- CR$cr_type-$sc_name-uninstall
   test_resource "StorageClass" "uninstall" $sc_name
 
   sc_name="sc-imm-spec"
+
+  echo --- CR$cr_type-$sc_name-install
   test_resource "StorageClass" "install" $sc_name
+
+  echo --- CR$cr_type-$sc_name-PVC-Block-install
   test_resource "PVC" "install" "Block" "1Gi" $sc_name
 
   cr_type=2
+
+  echo --- CR$cr_type-install
   test_resource "CustomResource" "install" $cr_type
+
+  echo --- CR$cr_type-$sc_name-PVC-Block-expand
   test_resource "PVC" "install" "Block" "2Gi" $sc_name
+
+  echo --- CR$cr_type-$sc_name-PVC-Block-uninstall
   test_resource "PVC" "uninstall" "Block" "2Gi" $sc_name
+
+  echo --- CR$cr_type-$sc_name-uninstall
   test_resource "StorageClass" "uninstall" $sc_name
+
+  echo --- CR$cr_type-uninstall
   test_resource "CustomResource" "uninstall" $cr_type
 
-  # TODO: Tests corresponding to CR types 3, 4 and 5
+  cr_type=3
+
+  echo --- CR$cr_type-install
+  test_resource "CustomResource" "install" $cr_type
+
+  sc_name="sc-imm-def"
+
+  echo --- CR$cr_type-$sc_name-install
+  test_resource "StorageClass" "install" $sc_name
+
+  echo --- CR$cr_type-$sc_name-PVC-FS-install
+  test_resource "PVC" "install" "Filesystem" "1Gi" $sc_name
+
+  echo --- CR$cr_type-$sc_name-PVC-FS-expand
+  test_resource "PVC" "install" "Filesystem" "2Gi" $sc_name
+
+  echo --- CR$cr_type-$sc_name-PVC-FS-uninstall
+  test_resource "PVC" "uninstall" "Filesystem" "2Gi" $sc_name
+
+  echo --- CR$cr_type-$sc_name-uninstall
+  test_resource "StorageClass" "uninstall" $sc_name
+
+  echo --- CR$cr_type-uninstall
+  test_resource "CustomResource" "uninstall" $cr_type
+
+  cr_type=4
+
+  echo --- CR$cr_type-install
+  test_resource "CustomResource" "install" $cr_type
+
+  sc_name="sc-imm-def"
+
+  echo --- CR$cr_type-$sc_name-install
+  test_resource "StorageClass" "install" $sc_name
+
+  echo --- CR$cr_type-$sc_name-PVC-Block-install
+  test_resource "PVC" "install" "Block" "1Gi" $sc_name
+
+  echo --- CR$cr_type-$sc_name-PVC-Block-expand
+  test_resource "PVC" "install" "Block" "2Gi" $sc_name
+
+  echo --- CR$cr_type-$sc_name-PVC-Block-uninstall
+  test_resource "PVC" "uninstall" "Block" "2Gi" $sc_name
+
+  echo --- CR$cr_type-$sc_name-uninstall
+  test_resource "StorageClass" "uninstall" $sc_name
+
+  echo --- CR$cr_type-uninstall
+  test_resource "CustomResource" "uninstall" $cr_type
+
 }
 
 function main() {
 
   # Step 1: Attach 4 disks of 10GB size if doesn't exist
-  # attach_disks
+  # create_attach_disks
 
-  # devices=($(oc debug node/${nodes[0]} -- lsblk -no Name,Size | grep "$size"G | awk '{print $1}'))
-  # [[ ${#devices[@]} -lt $disks ]] && echo ----- Not able to confirm disks availability in master node && exit 1
+  devices=($(oc debug node/${nodes[0]} -- lsblk -no Name,Size | grep "$size"G | awk '{print $1}'))
+  [[ ${#devices[*]} -lt $disks ]] && echo ----- Not able to confirm disks availability in master node && exit 1
 
   # Step 2: Install operator and validate
   # operator 'install'
@@ -559,6 +687,8 @@ function main() {
   # Step 4: Uninstall operator
   # operator 'uninstall'
 
+  # Step 5: Detach disks (optional)
+  # detach_delete_disks
 }
 
 main
