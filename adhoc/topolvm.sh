@@ -114,10 +114,10 @@ function operator() {
     if ! [ -e /tmp/crds-top.yaml ]; then curl -sL $repo/crds.yaml -o /tmp/crds-top.yaml; fi
     cat /tmp/crds-top.yaml
   )"
-  local certs="$(
-    if ! [ -e /tmp/controller_certs-top.yaml ]; then curl -sL $repo/controller_certs.yaml -o /tmp/controller_certs-top.yaml; fi
-    cat /tmp/controller_certs-top.yaml
-  )"
+  # local certs="$(
+  #   if ! [ -e /tmp/controller_certs-top.yaml ]; then curl -sL $repo/controller_certs.yaml -o /tmp/controller_certs-top.yaml; fi
+  #   cat /tmp/controller_certs-top.yaml
+  # )"
   local operator="$(
     if ! [ -e /tmp/operator-top.yaml ]; then curl -sL $repo/operator-openshift.yaml -o /tmp/operator-top.yaml; fi
     sed -e "s,image:.*$,image: $pr_image,g" -e '$a\          imagePullPolicy: Always' /tmp/operator-top.yaml
@@ -132,7 +132,7 @@ function operator() {
     echo --- installing operator in $ns namespace
     echo "$common" | oc apply -f -
     echo "$crds" | oc apply -f -
-    echo "$certs" | oc apply -f -
+    # echo "$certs" | oc apply -f -
     echo "$operator" | oc apply -f -
     # Wait for namespace creation
     sleep 5
@@ -141,7 +141,7 @@ function operator() {
     }
   elif [[ "$1" == "uninstall" ]]; then
     echo "$operator" | oc delete -f -
-    echo "$certs" | oc delete -f -
+    # echo "$certs" | oc delete -f -
     echo "$crds" | oc delete -f -
     echo "$common" | oc delete -f -
   fi
@@ -379,6 +379,12 @@ EOL
   echo "$result"
 }
 
+function get_pod() {
+
+  echo
+
+}
+
 function validate() {
   # $1 = string, CustomResource/PVC
   local timeout
@@ -511,16 +517,15 @@ function test_resource() {
   case $1 in
     "CustomResource")
       # $2 = string, install/uninstall
-      # $3 = num, type of CR
-      manifest="$(get_cr $3)"
+      manifest="$(get_cr $cr_type)"
       deploy $2 $1 "$manifest"
 
       [[ $2 == "uninstall" ]] && return 0
 
-      if [[ $3 == 1 ]]; then
+      if [[ $cr_type == 1 ]]; then
         validate $1 "test-master" 2
         validate $1 "test-master-1" 1
-      elif [[ $3 == 2 ]]; then
+      elif [[ $cr_typ == 2 ]]; then
         validate $1 "test-master" 2
         validate $1 "test-master-1" 2
       else
@@ -572,102 +577,139 @@ function test_resource() {
 function start_test() {
   # Create a CustomResource and perform testing corresponding to that CR
 
-  local cr_type=1
-  local sc_name="sc-imm-def"
+  devices=($(oc debug node/${nodes[0]} -- lsblk -no Name,Size | grep "$size"G | awk '{print $1}'))
+  [[ ${#devices[*]} -lt $disks ]] && echo ----- Not able to confirm disks availability in master node && exit 1
 
-  echo --- CR$cr_type-install
-  test_resource "CustomResource" "install" $cr_type
+  # cr_type=1
 
-  echo --- CR$cr_type-$sc_name-install
-  test_resource "StorageClass" "install" $sc_name
+  # echo --- CR$cr_type-install
+  # test_resource "CustomResource" "install"
 
-  echo --- CR$cr_type-$sc_name-PVC-FS-install
-  test_resource "PVC" "install" "Filesystem" "1Gi" $sc_name
+  # sc_name="sc-imm-def"
 
-  echo --- CR$cr_type-$sc_name-PVC-FS-expand
-  test_resource "PVC" "install" "Filesystem" "2Gi" $sc_name
+  # echo --- CR$cr_type-$sc_name-install
+  # test_resource "StorageClass" "install" $sc_name
 
-  echo --- CR$cr_type-$sc_name-PVC-FS-uninstall
-  test_resource "PVC" "uninstall" "Filesystem" "2Gi" $sc_name
+  # echo --- CR$cr_type-$sc_name-PVC-FS-install
+  # test_resource "PVC" "install" "Filesystem" "1Gi" $sc_name
 
-  echo --- CR$cr_type-$sc_name-uninstall
-  test_resource "StorageClass" "uninstall" $sc_name
+  # echo --- CR$cr_type-$sc_name-PVC-FS-expand
+  # test_resource "PVC" "install" "Filesystem" "2Gi" $sc_name
 
-  sc_name="sc-imm-spec"
+  # echo --- CR$cr_type-$sc_name-PVC-FS-uninstall
+  # test_resource "PVC" "uninstall" "Filesystem" "2Gi" $sc_name
 
-  echo --- CR$cr_type-$sc_name-install
-  test_resource "StorageClass" "install" $sc_name
+  # echo --- CR$cr_type-$sc_name-uninstall
+  # test_resource "StorageClass" "uninstall" $sc_name
 
-  echo --- CR$cr_type-$sc_name-PVC-Block-install
-  test_resource "PVC" "install" "Block" "1Gi" $sc_name
+  # sc_name="sc-imm-spec"
 
-  cr_type=2
+  # echo --- CR$cr_type-$sc_name-install
+  # test_resource "StorageClass" "install" $sc_name
 
-  echo --- CR$cr_type-install
-  test_resource "CustomResource" "install" $cr_type
+  # echo --- CR$cr_type-$sc_name-PVC-Block-install
+  # test_resource "PVC" "install" "Block" "1Gi" $sc_name
 
-  echo --- CR$cr_type-$sc_name-PVC-Block-expand
-  test_resource "PVC" "install" "Block" "2Gi" $sc_name
+  # cr_type=2
 
-  echo --- CR$cr_type-$sc_name-PVC-Block-uninstall
-  test_resource "PVC" "uninstall" "Block" "2Gi" $sc_name
+  # echo --- CR$cr_type-install
+  # test_resource "CustomResource" "install" $cr_type
 
-  echo --- CR$cr_type-$sc_name-uninstall
-  test_resource "StorageClass" "uninstall" $sc_name
+  # echo --- CR$cr_type-$sc_name-PVC-Block-expand
+  # test_resource "PVC" "install" "Block" "2Gi" $sc_name
 
-  echo --- CR$cr_type-uninstall
-  test_resource "CustomResource" "uninstall" $cr_type
+  # echo --- CR$cr_type-$sc_name-PVC-Block-uninstall
+  # test_resource "PVC" "uninstall" "Block" "2Gi" $sc_name
 
-  cr_type=3
+  # echo --- CR$cr_type-$sc_name-uninstall
+  # test_resource "StorageClass" "uninstall" $sc_name
 
-  echo --- CR$cr_type-install
-  test_resource "CustomResource" "install" $cr_type
+  # echo --- CR$cr_type-uninstall
+  # test_resource "CustomResource" "uninstall" $cr_type
 
-  sc_name="sc-imm-def"
+  # CR Type3 is not supported
+  # cr_type=3
 
-  echo --- CR$cr_type-$sc_name-install
-  test_resource "StorageClass" "install" $sc_name
+  # echo --- CR$cr_type-install
+  # test_resource "CustomResource" "install" $cr_type
 
-  echo --- CR$cr_type-$sc_name-PVC-FS-install
-  test_resource "PVC" "install" "Filesystem" "1Gi" $sc_name
+  # sc_name="sc-imm-def"
 
-  echo --- CR$cr_type-$sc_name-PVC-FS-expand
-  test_resource "PVC" "install" "Filesystem" "2Gi" $sc_name
+  # echo --- CR$cr_type-$sc_name-install
+  # test_resource "StorageClass" "install" $sc_name
 
-  echo --- CR$cr_type-$sc_name-PVC-FS-uninstall
-  test_resource "PVC" "uninstall" "Filesystem" "2Gi" $sc_name
+  # echo --- CR$cr_type-$sc_name-PVC-Block-install
+  # test_resource "PVC" "install" "Block" "1Gi" $sc_name
 
-  echo --- CR$cr_type-$sc_name-uninstall
-  test_resource "StorageClass" "uninstall" $sc_name
+  # echo --- CR$cr_type-$sc_name-PVC-Block-expand
+  # test_resource "PVC" "install" "Block" "2Gi" $sc_name
 
-  echo --- CR$cr_type-uninstall
-  test_resource "CustomResource" "uninstall" $cr_type
+  # echo --- CR$cr_type-$sc_name-PVC-Block-uninstall
 
-  cr_type=4
+  # echo --- CR$cr_type-$sc_name-uninstall
+  # test_resource "StorageClass" "uninstall" $sc_name
 
-  echo --- CR$cr_type-install
-  test_resource "CustomResource" "install" $cr_type
+  # echo --- CR$cr_type-uninstall
+  # test_resource "CustomResource" "uninstall" $cr_type
 
-  sc_name="sc-imm-def"
+  # cr_type=4
 
-  echo --- CR$cr_type-$sc_name-install
-  test_resource "StorageClass" "install" $sc_name
+  # echo --- CR$cr_type-install
+  # test_resource "CustomResource" "install" $cr_type
 
-  echo --- CR$cr_type-$sc_name-PVC-Block-install
-  test_resource "PVC" "install" "Block" "1Gi" $sc_name
+  # sc_name="sc-imm-def"
 
-  echo --- CR$cr_type-$sc_name-PVC-Block-expand
-  test_resource "PVC" "install" "Block" "2Gi" $sc_name
+  # echo --- CR$cr_type-$sc_name-install
+  # test_resource "StorageClass" "install" $sc_name
 
-  echo --- CR$cr_type-$sc_name-PVC-Block-uninstall
-  test_resource "PVC" "uninstall" "Block" "2Gi" $sc_name
+  # echo --- CR$cr_type-$sc_name-PVC-FS-install
+  # test_resource "PVC" "install" "Filesystem" "1Gi" $sc_name
 
-  echo --- CR$cr_type-$sc_name-uninstall
-  test_resource "StorageClass" "uninstall" $sc_name
+  # echo --- CR$cr_type-$sc_name-PVC-FS-expand
+  # test_resource "PVC" "install" "Filesystem" "2Gi" $sc_name
 
-  echo --- CR$cr_type-uninstall
-  test_resource "CustomResource" "uninstall" $cr_type
+  # echo --- CR$cr_type-$sc_name-PVC-FS-uninstall
+  # test_resource "PVC" "uninstall" "Filesystem" "2Gi" $sc_name
 
+  # echo --- CR$cr_type-$sc_name-uninstall
+  # test_resource "StorageClass" "uninstall" $sc_name
+
+  # echo --- CR$cr_type-uninstall
+  # test_resource "CustomResource" "uninstall" $cr_type
+
+  # cr_type=5
+
+  # echo --- CR$cr_type-install
+  # test_resource "CustomResource" "install" $cr_type
+
+  # sc_name="sc-wffc-def"
+
+  # echo --- CR$cr_type-$sc_name-install
+  # test_resource "StorageClass" "install" $sc_name
+
+  # echo --- CR$cr_type-$sc_name-PVC-FS-install
+  # test_resource "PVC" "install" "Filesystem" "1Gi" $sc_name
+
+  # echo --- CR$cr_type-$sc_name-PVC-FS-expand
+  # test_resource "PVC" "install" "Filesystem" "2Gi" $sc_name
+
+  # echo --- CR$cr_type-$sc_name-PVC-FS-uninstall
+  # test_resource "PVC" "uninstall" "Filesystem" "2Gi" $sc_name
+
+  # echo --- CR$cr_type-$sc_name-PVC-Block-install
+  # test_resource "PVC" "install" "Block" "1Gi" $sc_name
+
+  # echo --- CR$cr_type-$sc_name-PVC-Block-expand
+  # test_resource "PVC" "install" "Block" "2Gi" $sc_name
+
+  # echo --- CR$cr_type-$sc_name-PVC-Block-uninstall
+  # test_resource "PVC" "uninstall" "Block" "2Gi" $sc_name
+
+  # echo --- CR$cr_type-$sc_name-uninstall
+  # test_resource "StorageClass" "uninstall" $sc_name
+
+  # echo --- CR$cr_type-uninstall
+  # test_resource "CustomResource" "uninstall" $cr_type
 }
 
 function main() {
@@ -675,14 +717,11 @@ function main() {
   # Step 1: Attach 4 disks of 10GB size if doesn't exist
   # create_attach_disks
 
-  devices=($(oc debug node/${nodes[0]} -- lsblk -no Name,Size | grep "$size"G | awk '{print $1}'))
-  [[ ${#devices[*]} -lt $disks ]] && echo ----- Not able to confirm disks availability in master node && exit 1
-
   # Step 2: Install operator and validate
   # operator 'install'
 
   # Step 3: Start testing various combinations
-  # start_test
+  start_test
 
   # Step 4: Uninstall operator
   # operator 'uninstall'
