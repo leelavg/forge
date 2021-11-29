@@ -104,46 +104,36 @@ function operator() {
 
   local pr_image="quay.io/rhn_support_lgangava/topolvm-operator:sdk"
   local main="alaudapublic/topolvm-operator:2.2.0"
-  local commit="b108c190d474e2adee7c05dd682037023d20ce52"
-  local repo="https://raw.githubusercontent.com/alauda/topolvm-operator/$commit/deploy/example"
-  local common="$(
-    if ! [ -e /tmp/common-top.yaml ]; then curl -sL $repo/common.yaml -o /tmp/common-top.yaml; fi
-    cat /tmp/common-top.yaml
-  )"
-  local crds="$(
-    if ! [ -e /tmp/crds-top.yaml ]; then curl -sL $repo/crds.yaml -o /tmp/crds-top.yaml; fi
-    cat /tmp/crds-top.yaml
-  )"
-  # local certs="$(
-  #   if ! [ -e /tmp/controller_certs-top.yaml ]; then curl -sL $repo/controller_certs.yaml -o /tmp/controller_certs-top.yaml; fi
-  #   cat /tmp/controller_certs-top.yaml
-  # )"
+  local commit="662ccb83f9cb01c82f199d9d82c2713f29870945"
+  local repo="https://raw.githubusercontent.com/leelavg/topolvm-operator/$commit/deploy/example"
   local operator="$(
-    if ! [ -e /tmp/operator-top.yaml ]; then curl -sL $repo/operator-openshift.yaml -o /tmp/operator-top.yaml; fi
-    sed -e "s,image:.*$,image: $pr_image,g" -e '$a\          imagePullPolicy: Always' /tmp/operator-top.yaml
+    if ! [ -e /tmp/operator-top.yaml ]; then curl -sL $repo/operator-ocp.yaml -o /tmp/operator-top.yaml; fi
+    sed -e "s,image:.*$,image: $pr_image,g" /tmp/operator-top.yaml
   )"
-  # we don't need discovery before deploying CR
-  # local setting="$(
-  #   if ! [ -e /tmp/setting-top.yaml ]; then curl -sL $repo/setting.yaml -o /tmp/setting-top.yaml; fi
-  #   cat /tmp/setting-top.yaml
-  # )"
 
   if [[ "$1" == "install" ]]; then
     echo --- installing operator in $ns namespace
-    echo "$common" | oc apply -f -
-    echo "$crds" | oc apply -f -
-    # echo "$certs" | oc apply -f -
     echo "$operator" | oc apply -f -
     # Wait for namespace creation
     sleep 5
-    $oc wait --for=condition=ready pod -l name=topolvm-operator --timeout=30s || {
+    $oc wait --for=condition=ready pod -l app=topolvm-operator --timeout=30s || {
+      echo ----- Operator is not up && exit 1
+    }
+    $oc patch deployment topolvm-operator --patch "$(
+      cat <<EOL
+spec:
+  template:
+    spec:
+      containers:
+      - name: topolvm-operator
+        imagePullPolicy: Always
+EOL
+    )"
+    $oc wait --for=condition=ready pod -l app=topolvm-operator --timeout=30s || {
       echo ----- Operator is not up && exit 1
     }
   elif [[ "$1" == "uninstall" ]]; then
     echo "$operator" | oc delete -f -
-    # echo "$certs" | oc delete -f -
-    echo "$crds" | oc delete -f -
-    echo "$common" | oc delete -f -
   fi
 }
 
@@ -821,6 +811,7 @@ function main() {
 
   # Step 5: Detach disks (optional)
   detach_delete_disks
+
 }
 
 main
