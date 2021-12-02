@@ -104,8 +104,8 @@ function operator() {
 
   local pr_image="quay.io/rhn_support_lgangava/topolvm-operator:sdk"
   local main="alaudapublic/topolvm-operator:2.2.0"
-  local commit="662ccb83f9cb01c82f199d9d82c2713f29870945"
-  local repo="https://raw.githubusercontent.com/leelavg/topolvm-operator/$commit/deploy/example"
+  local commit="0b023e58e3f1eb0e4a44796fabf4bcd0d7a41211"
+  local repo="https://raw.githubusercontent.com/alauda/topolvm-operator/$commit/deploy/example"
   local operator="$(
     if ! [ -e /tmp/operator-top.yaml ]; then curl -sL $repo/operator-ocp.yaml -o /tmp/operator-top.yaml; fi
     sed -e "s,image:.*$,image: $pr_image,g" /tmp/operator-top.yaml
