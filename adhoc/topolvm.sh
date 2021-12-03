@@ -102,9 +102,9 @@ function detach_delete_disks() {
 function operator() {
   # $1 = string, install/uninstall
 
-  local pr_image="quay.io/rhn_support_lgangava/topolvm-operator:sdk"
+  local pr_image="quay.io/rhn_support_lgangava/topolvm-operator:fcf105f"
   local main="alaudapublic/topolvm-operator:2.2.0"
-  local commit="0b023e58e3f1eb0e4a44796fabf4bcd0d7a41211"
+  local commit="fcf105fe3acee052419310e2fee9e71d6f52d0bc"
   local repo="https://raw.githubusercontent.com/alauda/topolvm-operator/$commit/deploy/example"
   local operator="$(
     if ! [ -e /tmp/operator-top.yaml ]; then curl -sL $repo/operator-ocp.yaml -o /tmp/operator-top.yaml; fi
