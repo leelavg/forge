@@ -1,7 +1,7 @@
 #!/bin/bash
 # DONOT RUN WITHOUT CHECKING THE SCRIPT
 
-only='kadalu-operator|server|csi'
+only='busybox'
 options="mhp:a:t:k:f:"
 prg="teardown"
 pull="no"
@@ -147,9 +147,9 @@ EOF
   if [[ $agents -eq 0 ]]; then
     k3d cluster create test -a $agents \
       -v /tmp/k3d/kubelet/pods:/var/lib/kubelet/pods:shared \
-      -v /dev/sdc:/dev/sdc@server:0 -v /dev/sdd:/dev/sdd@server:0 -v /dev/sde:/dev/sde@server:0 -v /dev/sdf:/dev/sdf@server:0 -v /dev/sdg:/dev/sdg@server:0 \
-      -v /dev/sdh:/dev/sdh@server:0 -v /dev/sdi:/dev/sdi@server:0 -v /dev/sdj:/dev/sdj@server:0 -v /dev/sdk:/dev/sdk@server:0 -v /dev/sdl:/dev/sdl@server:0 \
-      -v /dev/sdm:/dev/sdm@server:0 -v /dev/sdn:/dev/sdn@server:0 -v /dev/sdo:/dev/sdo@server:0 -v /dev/sdp:/dev/sdp@server:0 -v /dev/sdq:/dev/sdq@server:0 \
+      -v /dev/sdb:/dev/sdb@server:0 -v /dev/sdc:/dev/sdc@server:0 -v /dev/sdd:/dev/sdd@server:0 -v /dev/sde:/dev/sde@server:0 -v /dev/sdf:/dev/sdf@server:0 \
+      -v /dev/sdg:/dev/sdg@server:0 -v /dev/sdh:/dev/sdh@server:0 -v /dev/sdi:/dev/sdi@server:0 -v /dev/sdj:/dev/sdj@server:0 -v /dev/sdk:/dev/sdk@server:0 \
+      -v /dev/sdl:/dev/sdl@server:0 -v /dev/sdn:/dev/sdn@server:0 -v /dev/sdo:/dev/sdo@server:0 -v /dev/sdp:/dev/sdp@server:0 -v /dev/sdq:/dev/sdq@server:0 \
       -v ~/.k3d/registries.yaml:/etc/rancher/k3s/registries.yaml \
       --k3s-arg "--kube-apiserver-arg=feature-gates=EphemeralContainers=true@server:*" \
       --k3s-arg "--disable=local-storage@server:*" \
@@ -157,9 +157,9 @@ EOF
   elif [[ $agents -eq 3 ]]; then
     k3d cluster create test -a $agents \
       -v /tmp/k3d/kubelet/pods:/var/lib/kubelet/pods:shared \
-      -v /dev/sdc:/dev/sdc@agent:0 -v /dev/sdd:/dev/sdd@agent:0 -v /dev/sde:/dev/sde@agent:0 -v /dev/sdf:/dev/sdf@agent:0 -v /dev/sdg:/dev/sdg@agent:0 \
-      -v /dev/sdh:/dev/sdh@agent:1 -v /dev/sdi:/dev/sdi@agent:1 -v /dev/sdj:/dev/sdj@agent:1 -v /dev/sdk:/dev/sdk@agent:1 -v /dev/sdl:/dev/sdl@agent:1 \
-      -v /dev/sdm:/dev/sdm@agent:2 -v /dev/sdn:/dev/sdn@agent:2 -v /dev/sdo:/dev/sdo@agent:2 -v /dev/sdp:/dev/sdp@agent:2 -v /dev/sdq:/dev/sdq@agent:2 \
+      -v /dev/sdb:/dev/sdb@agent:0 -v /dev/sdc:/dev/sdc@agent:0 -v /dev/sdd:/dev/sdd@agent:0 -v /dev/sde:/dev/sde@agent:0 -v /dev/sdf:/dev/sdf@agent:0 \
+      -v /dev/sdg:/dev/sdg@agent:1 -v /dev/sdh:/dev/sdh@agent:1 -v /dev/sdi:/dev/sdi@agent:1 -v /dev/sdj:/dev/sdj@agent:1 -v /dev/sdk:/dev/sdk@agent:1 \
+      -v /dev/sdl:/dev/sdl@agent:2 -v /dev/sdn:/dev/sdn@agent:2 -v /dev/sdo:/dev/sdo@agent:2 -v /dev/sdp:/dev/sdp@agent:2 -v /dev/sdq:/dev/sdq@agent:2 \
       -v ~/.k3d/registries.yaml:/etc/rancher/k3s/registries.yaml \
       --k3s-arg "--kube-apiserver-arg=feature-gates=EphemeralContainers=true@server:*" \
       --k3s-arg "--disable=local-storage@server:*" \
@@ -187,10 +187,6 @@ if [[ $prg == "teardown" ]]; then
 
   kubectx k3d-test || exit 1
 
-  # Remove sanity pods if there are any
-  kubectl delete ds -l name=sanity-ds --wait=true
-  kubectl delete deploy -l name=sanity-dp --wait=true
-
   # Pull all images that are currently deployed before teardown
   if [ $pull == "yes" ]; then
     for i in $(kubectl get pods --namespace kadalu -o jsonpath="{..image}" |
@@ -198,7 +194,12 @@ if [[ $prg == "teardown" ]]; then
   fi
 
   # Remove Kadalu
-  bash <(curl -s https://raw.githubusercontent.com/kadalu/kadalu/devel/extras/scripts/cleanup)
+  if [[ $(kubectl get ns kadalu --ignore-not-found | wc -l) != 0 ]]; then
+    # Remove sanity pods if there are any
+    kubectl delete ds -l name=sanity-ds --force -n kadalu
+    kubectl delete deploy -l name=sanity-dp --force -n kadalu
+    bash <(curl -s https://raw.githubusercontent.com/kadalu/kadalu/devel/extras/scripts/cleanup)
+  fi
 
   # Delete k3d cluster
   k3d cluster delete test
